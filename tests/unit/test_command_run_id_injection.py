@@ -47,7 +47,7 @@ def test_logged_command_resolves_run_id_placeholder():
 
 def test_compute_log_path():
     path = _svc()._executor._compute_log_path("abc-123")
-    assert path == "/var/log/ansible-runs/abc-123.log"
+    assert path == "/var/log/deploy-service/abc-123.log"
 
 
 import asyncio
