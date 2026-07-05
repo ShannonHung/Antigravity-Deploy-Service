@@ -68,7 +68,7 @@
             "--ssh-key",
             "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/data/ssh_keys/client_key",
             "--log-dir",
-            "/var/log/ansible-runs",
+            "/var/log/deploy-service",
             "--run-id",
             "{run_id}"
           ]
@@ -118,7 +118,7 @@
             "--ssh-key",
             "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/data/ssh_keys/client_key",
             "--log-dir",
-            "/var/log/ansible-runs",
+            "/var/log/deploy-service",
             "--run-id",
             "{run_id}"
           ]
