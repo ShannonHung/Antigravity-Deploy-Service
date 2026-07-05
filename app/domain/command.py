@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import asyncio
 from enum import Enum
 import asyncssh
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ── State Machine Domain Models ──────────────────────────────────────────────
@@ -95,8 +95,23 @@ class CommandWhitelistConfig(BaseModel):
     disconnects_ssh: bool = False
     killable: bool = False
     logged: bool = False  # opt-in: tee output to a per-run file + expose viewer
+    checks_script_version: bool = False  # opt-in: pre-check the target script version
+    min_script_version: Optional[str] = None  # required when checks_script_version is True
     pipeline: List[PipelineStep]
     arguments: List[CommandArgumentConfig] = []
+
+    @model_validator(mode="after")
+    def _validate_version_config(self) -> "CommandWhitelistConfig":
+        # A forgotten baseline must fail loudly at load, not silently no-op.
+        if self.checks_script_version:
+            from app.core.version import parse_semver
+            if not self.min_script_version:
+                raise ValueError(
+                    f"command '{self.command_name}': checks_script_version=true "
+                    "requires min_script_version"
+                )
+            parse_semver(self.min_script_version)  # raises ValueError if malformed
+        return self
 
 class UserCommandWhitelist(BaseModel):
     name: str = "admin"
@@ -129,6 +144,15 @@ class CommandExecutionRequest(BaseModel):
     ssh_config: str = "default"
     option: Optional[CommandOption] = Field(default_factory=CommandOption)
     arguments: Dict[str, Any] = Field(default_factory=dict)
+    # Optional caller-supplied floor; may only RAISE the whitelist minimum.
+    min_script_version: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_min_script_version(self) -> "CommandExecutionRequest":
+        if self.min_script_version is not None:
+            from app.core.version import parse_semver
+            parse_semver(self.min_script_version)  # raises ValueError if malformed
+        return self
 
 class CommandExecutionResponse(BaseModel):
     command_id: Optional[str] = None
@@ -170,6 +194,10 @@ class CommandTraceResponse(BaseModel):
     total_size: int = 0
     size_warning: bool = False
     too_large: bool = False
+    # True when the command was not run with ``logged: true``, so no run log
+    # exists on the control_node and the viewer has nothing to stream. The UI
+    # shows an explanatory notice instead of an empty, forever-polling page.
+    not_logged: bool = False
     # Where the full log physically lives on the control_node. Populated only on
     # the `too_large` bail-out so the user can read it directly (ssh + tail);
     # left None on normal slices to keep the response lean.

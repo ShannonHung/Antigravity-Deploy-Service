@@ -67,9 +67,13 @@ class CommandTrace:
         status = state.status.value if hasattr(state.status, "value") else str(state.status)
 
         if not state.run_log_path:
+            # Command wasn't run with logged:true, so no run log was ever
+            # tee'd to the control_node. Flag it so the viewer shows an
+            # explanatory notice instead of polling an empty page forever.
             return CommandTraceResponse(
                 command_id=command_id, status=status,
                 next_byte_offset=byte_offset, next_line_num=line_num, lines=[],
+                not_logged=True,
             )
 
         total_size, new_text = await self._read_remote_log(state, byte_offset)

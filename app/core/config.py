@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     COMMAND_MAX_RUNNING: int = 50
     SSH_CONNECT_TIMEOUT_SECONDS: int = 30
     # Control_node directory where run-ansible.sh tees per-run logs.
-    COMMAND_LOG_DIR: str = "/var/log/ansible-runs"
+    COMMAND_LOG_DIR: str = "/var/log/deploy-service"
     # Soft cap → CommandTraceResponse.size_warning (banner, keep polling).
     COMMAND_LOG_SOFT_CAP_BYTES: int = 5 * 1024 * 1024
     # Hard cap → CommandTraceResponse.too_large (viewer stops polling).

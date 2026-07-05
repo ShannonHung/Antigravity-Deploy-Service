@@ -29,7 +29,9 @@ from app.core.exceptions import (
     UpstreamUnavailableException,
     ForbiddenException,
     ServiceUnavailableException,
+    ScriptVersionException,
 )
+from app.core.version import version_ge, version_max
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -209,6 +211,77 @@ class CommandExecutor:
     def _compute_log_path(self, command_id: str) -> str:
         """Control_node path where run-ansible.sh tees this run's log."""
         return f"{settings.COMMAND_LOG_DIR}/{command_id}.log"
+
+    @staticmethod
+    def _parse_version_output(text: str) -> str:
+        """Extract the last whitespace-delimited X.Y.Z token from --version output.
+
+        Tolerates a leading script name (e.g. "run-ansible.sh 1.4.0").
+        Raises ValueError if no semver-shaped token is present.
+        """
+        tokens = re.findall(r"\b\d+\.\d+\.\d+\b", text or "")
+        if not tokens:
+            raise ValueError(f"no version found in output: {text!r}")
+        return tokens[-1]
+
+    async def _precheck_script_version(self, context: ExecutionContext) -> None:
+        """Reject the request if the target script is older than required.
+
+        No-op unless the command opts in via ``checks_script_version``. Runs
+        ``<script> --version`` over the already-open SSH connection, parses the
+        semver, and compares against ``max(whitelist_min, api_min)``. Any failure
+        to fetch/parse the version is treated as a rejection (fail closed).
+        """
+        cfg = context.cmd_config
+        if not cfg.checks_script_version:
+            return
+
+        effective_min = cfg.min_script_version
+        script = context.pipeline_cmds[0][0]
+        api_min = context.raw_request.min_script_version
+        if api_min:
+            try:
+                effective_min = version_max(effective_min, api_min)
+            except ValueError as exc:
+                raise ScriptVersionException(
+                    f"Invalid version requirement for '{script}'.",
+                    detail={"required": effective_min, "api_min": api_min},
+                ) from exc
+
+        cmd_str = shlex.join([script, "--version"])
+        result = await context.conn.run(cmd_str, check=False)
+
+        if result.exit_status != 0:
+            raise ScriptVersionException(
+                f"Could not read version of '{script}' on the target "
+                f"(exit {result.exit_status}).",
+                detail={"script": script, "required": effective_min},
+            )
+
+        raw = (str(result.stdout) if result.stdout else "") + \
+              ("\n" + str(result.stderr) if result.stderr else "")
+        try:
+            actual = CommandExecutor._parse_version_output(raw)
+        except ValueError as exc:
+            raise ScriptVersionException(
+                f"Could not parse version of '{script}' on the target.",
+                detail={"script": script, "required": effective_min},
+            ) from exc
+
+        try:
+            ok = version_ge(actual, effective_min)
+        except ValueError as exc:
+            raise ScriptVersionException(
+                f"Invalid version data for '{script}'.",
+                detail={"script": script, "actual": actual, "required": effective_min},
+            ) from exc
+
+        if not ok:
+            raise ScriptVersionException(
+                f"{script} on the target is version {actual}, "
+                f"below the required {effective_min}.",
+                detail={"script": script, "actual": actual, "required": effective_min},
+            )
 
     async def _connect(self, context: ExecutionContext, req: CommandExecutionRequest) -> asyncssh.SSHClientConnection:
         """Establish an SSH connection to the target host.
@@ -661,6 +734,15 @@ class CommandExecutor:
 
         conn = await self._connect(context, req)
         context.conn = conn
+
+        # Version gate: reject before running anything if the target script is
+        # too old. On rejection, close the just-opened connection so it isn't
+        # leaked (the dispatch handlers own the close on the success path).
+        try:
+            await self._precheck_script_version(context)
+        except Exception:
+            conn.close()
+            raise
 
         if context.cmd_config.disconnects_ssh:
             return await self._handle_fire_and_forget(context)

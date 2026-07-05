@@ -54,6 +54,8 @@
       "disconnects_ssh": false,
       "killable": true,
       "logged": true,
+      "checks_script_version": false,
+      "min_script_version": "2.0.0",
       "pipeline": [
         {
           "command": [
@@ -68,7 +70,7 @@
             "--ssh-key",
             "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/data/ssh_keys/client_key",
             "--log-dir",
-            "/var/log/ansible-runs",
+            "/var/log/deploy-service",
             "--run-id",
             "{run_id}"
           ]
@@ -118,7 +120,7 @@
             "--ssh-key",
             "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/data/ssh_keys/client_key",
             "--log-dir",
-            "/var/log/ansible-runs",
+            "/var/log/deploy-service",
             "--run-id",
             "{run_id}"
           ]

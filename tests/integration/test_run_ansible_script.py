@@ -428,3 +428,34 @@ def test_token_file_missing_is_an_error(tmp_path):
     res = _run_with_recording_git(tmp_path, "--token-file", "/nonexistent/tok")
     assert res.returncode == 2
     assert "token-file" in (res.stderr + res.stdout).lower()
+
+
+def test_version_flag_prints_and_exits_zero(tmp_path):
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--version"],
+        capture_output=True, text=True, env={**os.environ},
+    )
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.strip().startswith("run-ansible.sh ")
+    # trailing token is strict semver
+    last = res.stdout.strip().split()[-1]
+    parts = last.split(".")
+    assert len(parts) == 3 and all(p.isdigit() for p in parts)
+
+
+def test_min_version_satisfied_proceeds(tmp_path):
+    # min below SCRIPT_VERSION -> passes the guard, continues to DRYRUN exit 0
+    res = _run(tmp_path, "--run-id", "ok", "--min-version", "0.0.1")
+    assert res.returncode == 0, res.stderr
+
+
+def test_min_version_too_high_exits_4(tmp_path):
+    res = _run(tmp_path, "--run-id", "ok", "--min-version", "99.0.0")
+    assert res.returncode == 4
+    assert "version" in (res.stderr + res.stdout).lower()
+
+
+def test_min_version_malformed_rejected(tmp_path):
+    res = _run(tmp_path, "--run-id", "ok", "--min-version", "1.2")
+    assert res.returncode != 0
+    assert "version" in (res.stderr + res.stdout).lower()

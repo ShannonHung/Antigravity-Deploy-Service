@@ -174,6 +174,19 @@ class CommandExecutionException(BaseAppException):
     log_level = logging.WARNING
 
 
+class ScriptVersionException(BaseAppException):
+    """Raised when a target script's version is below the required minimum.
+
+    Surfaced as 412 Precondition Failed: the request is well-formed but the
+    control_node script does not meet the version precondition, so the pipeline
+    is not run.
+    """
+
+    http_status = 412
+    error_code = "SCRIPT_VERSION_MISMATCH"
+    log_level = logging.WARNING
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Global exception handlers
 # ──────────────────────────────────────────────────────────────────────────────

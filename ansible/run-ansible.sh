@@ -19,6 +19,7 @@ set -euo pipefail
 INVENTORY_NAMESPACE="https://gitlab.com/ShannonHung"
 INVENTORY_REPO_NAME="my-ansible-inventory"   # --inventory-repo-name <name>
 IMAGE="shannonhung/ansible-runner:latest"
+SCRIPT_VERSION="1.0.0"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 PLAYBOOK=""
@@ -38,6 +39,7 @@ LOG_DIR="$(pwd)/logs"
 RUN_ID=""                  # per-run id from deploy-service; log is <run_id>.log
 LOG_RETENTION_DAYS=3       # prune <log-dir>/*.log older than this many days
 SSH_KEY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data/ssh_keys/client_key"
+MIN_VERSION=""             # --min-version <X.Y.Z>: self-guard minimum
 
 usage() {
   cat <<'EOF'
@@ -84,6 +86,22 @@ Example:
 EOF
 }
 
+# Strict semver X.Y.Z numeric per-segment comparison: version_ge A B -> A >= B.
+version_ge() {
+  local a="$1" b="$2"
+  if [[ ! "$a" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$b" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "Error: version must be X.Y.Z (got '$a' vs '$b')." >&2
+    exit 4
+  fi
+  local IFS=.
+  local -a A=($a) B=($b)
+  for i in 0 1 2; do
+    if (( 10#${A[i]} > 10#${B[i]} )); then return 0; fi
+    if (( 10#${A[i]} < 10#${B[i]} )); then return 1; fi
+  done
+  return 0
+}
+
 # ── Arg parsing ──────────────────────────────────────────────────────────────
 parse_args() {
   while [[ $# -gt 0 ]]; do
@@ -105,6 +123,8 @@ parse_args() {
       --ssh-key)             SSH_KEY="$2"; shift 2 ;;
       --dry-run)             WANT_DRY_RUN=1; shift ;;
       -d|--debug)            WANT_DEBUG=1; shift ;;
+      --version)             echo "run-ansible.sh $SCRIPT_VERSION"; exit 0 ;;
+      --min-version)         MIN_VERSION="$2"; shift 2 ;;
       -h|--help)             usage; exit 0 ;;
       *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
     esac
@@ -142,6 +162,13 @@ parse_args() {
   if [[ -n "$TOKEN_FILE" && ! -f "$TOKEN_FILE" ]]; then
     echo "Error: --token-file not found: $TOKEN_FILE" >&2
     exit 2
+  fi
+
+  if [[ -n "$MIN_VERSION" ]]; then
+    if ! version_ge "$SCRIPT_VERSION" "$MIN_VERSION"; then
+      echo "Error: run-ansible.sh version $SCRIPT_VERSION is below the required minimum $MIN_VERSION." >&2
+      exit 4
+    fi
   fi
 }
 
@@ -290,6 +317,7 @@ build_cmd_args() {
 print_summary() {
   cat <<EOF
 ══════════════════ RUN SUMMARY ══════════════════
+  Script version : $SCRIPT_VERSION
   Inventory repo : $INVENTORY_REPO
   Inventory ref  : $INVENTORY_REF
   Auth           : $(auth_label)
