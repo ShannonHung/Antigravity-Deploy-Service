@@ -54,6 +54,8 @@
       "disconnects_ssh": false,
       "killable": true,
       "logged": true,
+      "checks_script_version": false,
+      "min_script_version": "2.0.0",
       "pipeline": [
         {
           "command": [
