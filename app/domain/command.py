@@ -194,6 +194,10 @@ class CommandTraceResponse(BaseModel):
     total_size: int = 0
     size_warning: bool = False
     too_large: bool = False
+    # True when the command was not run with ``logged: true``, so no run log
+    # exists on the control_node and the viewer has nothing to stream. The UI
+    # shows an explanatory notice instead of an empty, forever-polling page.
+    not_logged: bool = False
     # Where the full log physically lives on the control_node. Populated only on
     # the `too_large` bail-out so the user can read it directly (ssh + tail);
     # left None on normal slices to keep the response lean.

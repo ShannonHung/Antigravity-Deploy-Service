@@ -390,6 +390,11 @@ LOG_VIEWER_HTML = """
                     const sshCmd = `ssh ${{user}}${{escapeHtml(opts.logHost)}}${{port}} tail -f ${{escapeHtml(opts.logFilePath)}}`;
                     extraRows += `<div><span class="label">Read it</span><code>${{sshCmd}}</code></div>`;
                 }}
+            }} else if (opts.reason === 'not_logged') {{
+                jobStatusBadge.innerText = 'NOT LOGGED';
+                heading = 'Logging not enabled for this command';
+                body = `This command was not configured with <code>logged: true</code>, so no run log is streamed to the viewer. Its output is returned directly in the command execution API response instead.`;
+                extraRows = '';
             }} else {{
                 jobStatusBadge.innerText = 'UNAVAILABLE';
                 const detail = opts.err && opts.err.message ? opts.err.message : 'Unknown error';
@@ -432,6 +437,14 @@ LOG_VIEWER_HTML = """
                 jobStatusBadge.innerText = status.toUpperCase();
                 if (typeof data.total_size === 'number') {{
                     traceSizeBadge.innerText = formatBytes(data.total_size);
+                }}
+
+                // Command wasn't run with logged:true — there is no run log to
+                // stream. Show a one-shot notice and stop polling (a log file
+                // will never appear), rather than spinning on an empty page.
+                if (data.not_logged) {{
+                    showFatalError({{ reason: 'not_logged' }});
+                    return;
                 }}
 
                 // Hard cap: stop polling, switch to error panel, keep

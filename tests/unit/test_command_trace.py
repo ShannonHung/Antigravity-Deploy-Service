@@ -30,6 +30,20 @@ async def test_trace_no_log_path_returns_empty_with_status():
     assert resp.status == "success"
     assert resp.total_size == 0
     assert resp.next_byte_offset == 0
+    # A command without a run log (logged:false) is flagged so the viewer can
+    # show a "logging not enabled" notice instead of an empty, polling page.
+    assert resp.not_logged is True
+
+
+async def test_trace_logged_command_is_not_flagged_not_logged(monkeypatch):
+    # A logged command (run_log_path set) must NOT carry the not_logged flag.
+    svc = _svc_with_state(_state(run_log_path="/var/log/deploy-service/c1.log"))
+    monkeypatch.setattr(
+        svc._trace, "_read_remote_log",
+        AsyncMock(return_value=(0, "")),
+    )
+    resp = await svc.get_command_trace("c1", byte_offset=0, line_num=1)
+    assert resp.not_logged is False
 
 
 async def test_trace_unknown_command_raises_notfound():
