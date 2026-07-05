@@ -96,8 +96,8 @@ version_ge() {
   local IFS=.
   local -a A=($a) B=($b)
   for i in 0 1 2; do
-    if (( A[i] > B[i] )); then return 0; fi
-    if (( A[i] < B[i] )); then return 1; fi
+    if (( 10#${A[i]} > 10#${B[i]} )); then return 0; fi
+    if (( 10#${A[i]} < 10#${B[i]} )); then return 1; fi
   done
   return 0
 }

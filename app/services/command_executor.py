@@ -237,11 +237,17 @@ class CommandExecutor:
             return
 
         effective_min = cfg.min_script_version
+        script = context.pipeline_cmds[0][0]
         api_min = context.raw_request.min_script_version
         if api_min:
-            effective_min = version_max(effective_min, api_min)
+            try:
+                effective_min = version_max(effective_min, api_min)
+            except ValueError as exc:
+                raise ScriptVersionException(
+                    f"Invalid version requirement for '{script}'.",
+                    detail={"required": effective_min, "api_min": api_min},
+                ) from exc
 
-        script = context.pipeline_cmds[0][0]
         cmd_str = shlex.join([script, "--version"])
         result = await context.conn.run(cmd_str, check=False)
 
