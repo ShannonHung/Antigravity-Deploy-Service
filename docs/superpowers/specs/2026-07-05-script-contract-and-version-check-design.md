@@ -164,13 +164,29 @@ hard-coded `--log-dir /var/log/ansible-runs` updated to
 occurrences across `data/allow-commands-admin.json` and
 `data/allow-commands-cluster_proxy.json`).
 
+**Output policy that accompanies `logged: true` (already implemented — document
+only).** `_apply_output_policy` (`app/services/command_executor.py`) already
+gives every `logged: true` command this behaviour, and it is bound to the
+`logged` flag (not to ansible), so any conforming script inherits it:
+- **Success →** the API response carries no output; the caller goes to `/view`
+  for the full log.
+- **Failure →** the response includes the last `COMMAND_LOG_FAILURE_TAIL_LINES`
+  lines (default **50**) of output, so the error is visible inline.
+- **Full content →** always available at `/view` (the control_node
+  `<run_id>.log`), regardless of outcome.
+
+The contract document MUST state this so script authors know that opting into
+`logged: true` also opts into this success-silent / failure-tail policy. No code
+change — this is documentation only.
+
 ## What is NOT changing
 
-- The `/view` route, the `logged` output-detachment mechanism, and the
-  `<run_id>.log` / `<run_id>.exit` / EXIT-marker heal machinery — all already
-  exist and are already generic. This design documents them and adds the two
-  new whitelist fields + version pre-check; it does not rework the log/view
-  path.
+- The `/view` route, the `logged` output-detachment mechanism, the
+  `<run_id>.log` / `<run_id>.exit` / EXIT-marker heal machinery, and the
+  success-silent / failure-tail output policy (`_apply_output_policy`) — all
+  already exist and are already generic. This design documents them and adds the
+  two new whitelist fields + version pre-check; it does not rework the log/view
+  path or the output policy.
 - The anti-injection guarantee (discrete args, no `eval`, `shlex.join`) is
   untouched on both sides.
 
@@ -192,7 +208,9 @@ occurrences across `data/allow-commands-admin.json` and
 
 ## Deliverables
 
-1. `docs/arch/script-contract.md` — the general script contract (English).
+1. `docs/arch/script-contract.md` — the general script contract (English),
+   including the `logged: true` output policy (success-silent / failure-tail /
+   full log at `/view`).
 2. `run-ansible.sh`: `SCRIPT_VERSION`, `--version`, `--min-version`,
    `version_ge`, version in summary/log.
 3. `app/core/version.py` + tests.
