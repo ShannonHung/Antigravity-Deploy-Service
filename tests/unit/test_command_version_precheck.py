@@ -81,3 +81,17 @@ async def test_precheck_raises_when_version_call_fails():
     ctx = _ctx(checks=True, whitelist_min="1.2.0", api_min=None, conn=conn)
     with pytest.raises(ScriptVersionException):
         await CommandExecutor._precheck_script_version(None, ctx)
+
+
+async def test_precheck_raises_when_output_unparseable():
+    conn = _FakeConn(_FakeResult(0, "starting up, no version here"))
+    ctx = _ctx(checks=True, whitelist_min="1.2.0", api_min=None, conn=conn)
+    with pytest.raises(ScriptVersionException):
+        await CommandExecutor._precheck_script_version(None, ctx)
+
+
+async def test_precheck_raises_when_actual_malformed():
+    conn = _FakeConn(_FakeResult(0, "run-ansible.sh 01.2.0"))
+    ctx = _ctx(checks=True, whitelist_min="1.2.0", api_min=None, conn=conn)
+    with pytest.raises(ScriptVersionException):
+        await CommandExecutor._precheck_script_version(None, ctx)

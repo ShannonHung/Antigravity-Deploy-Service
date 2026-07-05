@@ -730,8 +730,13 @@ class CommandExecutor:
         context.conn = conn
 
         # Version gate: reject before running anything if the target script is
-        # too old (fast failure, no wasted work). Runs over the open conn.
-        await self._precheck_script_version(context)
+        # too old. On rejection, close the just-opened connection so it isn't
+        # leaked (the dispatch handlers own the close on the success path).
+        try:
+            await self._precheck_script_version(context)
+        except Exception:
+            conn.close()
+            raise
 
         if context.cmd_config.disconnects_ssh:
             return await self._handle_fire_and_forget(context)
