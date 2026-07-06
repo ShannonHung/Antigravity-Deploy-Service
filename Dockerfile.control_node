@@ -13,7 +13,8 @@ RUN apt-get update && \
         git \
         curl \
         ca-certificates \
-        iproute2 && \
+        iproute2 \
+        python3 && \
     rm -rf /var/lib/apt/lists/*
 
 # Same SSH setup as the test nodes: root login, pubkey, and trust the CA so the
