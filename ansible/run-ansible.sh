@@ -19,13 +19,16 @@ set -euo pipefail
 INVENTORY_NAMESPACE="https://gitlab.com/ShannonHung"
 INVENTORY_REPO_NAME="my-ansible-inventory"   # --inventory-repo-name <name>
 IMAGE="shannonhung/ansible-runner:latest"
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="2.0.0"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 PLAYBOOK=""
 INVENTORY=""               # path RELATIVE to the inventory repo root
 INVENTORY_REF="main"       # branch/tag of the inventory repo to clone
-TOKEN_FILE=""              # --token-file <path>: read clone token from a file
+SECRET_PATH="${SECRET_PATH:-}"  # --secret-path <path>: a KEY=VALUE env file
+                           # sourced before the run (e.g. INVENTORY_TOKEN for the
+                           # inventory clone, ANSIBLE_VAULT_PASSWORD for vault).
+                           # Also honoured from the SECRET_PATH env var.
 TAGS=""
 LIMIT=""
 EXTRA_VARS=""
@@ -54,10 +57,13 @@ Options:
   --inventory-ref <ref>   Branch/tag of the inventory repo to clone (default: main)
   --inventory-repo-name <name>  Inventory repo under the fixed namespace to clone
                           (default: my-ansible-inventory; e.g. ansible-inventory-v2)
-  --token-file <path>     Read the clone auth token from this file. Token may also
-                          come from the INVENTORY_TOKEN env var. The token is NEVER
-                          accepted as a CLI value, never logged, and never placed in
-                          the clone URL (passed to git via GIT_ASKPASS only).
+  --secret-path <path>    KEY=VALUE env file sourced before the run. Recognised
+                          keys: INVENTORY_TOKEN (private inventory clone) and
+                          ANSIBLE_VAULT_PASSWORD (ansible-vault decrypt). The file
+                          must be chmod 600/400 (not group/other-accessible).
+                          Secret VALUES are never accepted as CLI args, never
+                          logged, and never placed in argv/URL. Also honoured from
+                          the SECRET_PATH env var.
   --tags <tags>           Comma-separated ansible --tags
   --limit <pattern>       ansible --limit host/group pattern
   --extra-vars <k=v ...>  ansible --extra-vars string
@@ -75,14 +81,17 @@ Options:
 
 The inventory repo is cloned fresh each run (under the fixed namespace
 https://gitlab.com/ShannonHung) and removed afterward. Select it with
---inventory-repo-name; private repos authenticate via INVENTORY_TOKEN or
---token-file.
+--inventory-repo-name; private repos authenticate via INVENTORY_TOKEN, which
+(together with ANSIBLE_VAULT_PASSWORD) is typically supplied by --secret-path.
 
 Example:
   ./run-ansible.sh --playbook ping.yml --inventory taipei/multinode.ini --limit node1
   ./run-ansible.sh -d --playbook ping.yml --inventory taipei/multinode.ini --limit node1
-  INVENTORY_TOKEN=glpat-xxx ./run-ansible.sh --inventory-repo-name ansible-inventory-v2 \
+  ./run-ansible.sh --secret-path ~/.secrets.env --inventory-repo-name ansible-inventory-v2 \
       --playbook ping.yml --inventory taipei/multinode.ini
+  # ~/.secrets.env (chmod 600):
+  #   INVENTORY_TOKEN=glpat-xxx
+  #   ANSIBLE_VAULT_PASSWORD=s3cr3t
 EOF
 }
 
@@ -110,7 +119,7 @@ parse_args() {
       --inventory)           INVENTORY="$2"; shift 2 ;;
       --inventory-ref)       INVENTORY_REF="$2"; shift 2 ;;
       --inventory-repo-name) INVENTORY_REPO_NAME="$2"; shift 2 ;;
-      --token-file)          TOKEN_FILE="$2"; shift 2 ;;
+      --secret-path)         SECRET_PATH="$2"; shift 2 ;;
       --tags)                TAGS="$2"; shift 2 ;;
       --limit)               LIMIT="$2"; shift 2 ;;
       --extra-vars)          EXTRA_VARS="$2"; shift 2 ;;
@@ -157,10 +166,10 @@ parse_args() {
     exit 2
   fi
 
-  # --token-file must point at a readable file if given (the token VALUE is read
-  # later, in resolve_token, so failures here don't depend on docker/git).
-  if [[ -n "$TOKEN_FILE" && ! -f "$TOKEN_FILE" ]]; then
-    echo "Error: --token-file not found: $TOKEN_FILE" >&2
+  # --secret-path must point at a readable file if given (its VALUES are sourced
+  # later, in load_secrets, which also enforces the 600/400 permission bound).
+  if [[ -n "$SECRET_PATH" && ! -f "$SECRET_PATH" ]]; then
+    echo "Error: --secret-path not found: $SECRET_PATH" >&2
     exit 2
   fi
 
@@ -219,17 +228,42 @@ resolve_inventory_repo() {
   fi
 }
 
-# Resolve the clone token (optional). Precedence: --token-file > INVENTORY_TOKEN
-# env > none (anonymous). Sets CLONE_TOKEN and AUTH_SOURCE (file|env|anonymous).
-# The token VALUE is never echoed; only its source is reported.
+# Load secrets from --secret-path (a KEY=VALUE env file) into the environment so
+# the rest of the run can consume them (INVENTORY_TOKEN for the clone,
+# ANSIBLE_VAULT_PASSWORD for vault). `set -a` exports every key the file defines
+# so `docker run -e NAME` (value-less form) and git's env-config pick them up.
+#
+# The file is `source`d, i.e. executed as shell — so it MUST be trusted. We
+# refuse to source anything group/other-accessible (a writable file would be
+# arbitrary code execution) to keep the trust boundary honest.
+load_secrets() {
+  [[ -z "$SECRET_PATH" ]] && return 0
+  if [[ ! -f "$SECRET_PATH" ]]; then
+    echo "Error: --secret-path not found: $SECRET_PATH" >&2
+    exit 2
+  fi
+  local mode=""
+  if ! mode="$(stat -c '%a' "$SECRET_PATH" 2>/dev/null)"; then
+    mode="$(stat -f '%Lp' "$SECRET_PATH" 2>/dev/null || echo "")"
+  fi
+  # Reject if group/other bits are set (last two octal digits must be "00").
+  if [[ -n "$mode" && "${mode: -2}" != "00" ]]; then
+    echo "Error: secret file $SECRET_PATH must be chmod 600/400 (not group/other-accessible). Current: $mode" >&2
+    exit 2
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  . "$SECRET_PATH"
+  set +a
+}
+
+# Resolve the clone token (optional). Source: INVENTORY_TOKEN env (populated by
+# load_secrets, or set by the caller) > none (anonymous). Sets CLONE_TOKEN and
+# AUTH_SOURCE (env|anonymous). The token VALUE is never echoed; only its source.
 resolve_token() {
   CLONE_TOKEN=""
   AUTH_SOURCE="anonymous"
-  if [[ -n "$TOKEN_FILE" ]]; then
-    # Strip a single trailing newline; keep the rest verbatim.
-    CLONE_TOKEN="$(cat "$TOKEN_FILE")"
-    AUTH_SOURCE="file"
-  elif [[ -n "${INVENTORY_TOKEN:-}" ]]; then
+  if [[ -n "${INVENTORY_TOKEN:-}" ]]; then
     CLONE_TOKEN="$INVENTORY_TOKEN"
     AUTH_SOURCE="env"
   fi
@@ -238,19 +272,16 @@ resolve_token() {
 # Human-readable auth label for the summary (never the token value).
 auth_label() {
   case "$AUTH_SOURCE" in
-    file) echo "token (file)" ;;
     env)  echo "token (env)" ;;
     *)    echo "anonymous" ;;
   esac
 }
 
 # ── Fresh inventory clone (deleted on exit, always latest) ───────────────────
-# cleanup removes the clone dir AND the askpass helper (if one was created).
+# cleanup removes the clone dir. `|| true` guards the rm so a non-zero status
+# from it can't clobber the script's real exit code (the EXIT trap runs last).
 cleanup() {
-  rm -rf "$CLONE_DIR"
-  # Guard with `|| true`: a false [[ -n ... ]] would otherwise become the trap's
-  # exit status and clobber the script's real exit code (the EXIT trap runs last).
-  [[ -n "${ASKPASS_HELPER:-}" ]] && rm -f "$ASKPASS_HELPER" || true
+  rm -rf "$CLONE_DIR" || true
 }
 
 clone_inventory() {
@@ -267,22 +298,24 @@ clone_inventory() {
   echo ">> Auth: $AUTH_SOURCE"
 
   if [[ -n "$CLONE_TOKEN" ]]; then
-    # Authenticate WITHOUT leaking the token: a GIT_ASKPASS helper supplies it on
-    # demand. The token reaches git only via the helper's stdout — never in argv
-    # (ps), the URL, git config, or any log. The helper reads the token from its
-    # own env (exported solely for this git call), so the token is not baked into
-    # the helper file's contents either. The URL carries only the "oauth2"
-    # username; for a GitLab PAT the username is ignored and the token (as
-    # password) is what authenticates.
-    ASKPASS_HELPER="$(mktemp "$CLONE_PARENT/askpass.XXXXXX")"
-    chmod 600 "$ASKPASS_HELPER"
-    printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$INVENTORY_GIT_TOKEN"' \
-      > "$ASKPASS_HELPER"
-    chmod 700 "$ASKPASS_HELPER"
-    local auth_url="${INVENTORY_REPO/https:\/\//https://oauth2@}"
-    GIT_ASKPASS="$ASKPASS_HELPER" GIT_TERMINAL_PROMPT=0 \
-      INVENTORY_GIT_TOKEN="$CLONE_TOKEN" \
-      git clone --depth 1 --branch "$INVENTORY_REF" "$auth_url" "$CLONE_DIR"
+    # Authenticate WITHOUT leaking the token and WITHOUT an askpass helper: the
+    # credential rides in as an HTTP Authorization header injected via git's
+    # env-based config (GIT_CONFIG_* — git >= 2.31). The token therefore lives
+    # only in this git process's ENVIRONMENT (base64-encoded), never in:
+    #   * argv        → invisible to `ps`
+    #   * the URL      → the clone uses the bare repo URL, so no credential is
+    #                    written to the clone's .git/config (which is later
+    #                    bind-mounted read-only into the ansible container)
+    #   * any log/summary output
+    # For a GitLab PAT, Basic auth with any username + the token as password
+    # authenticates; we use the conventional "oauth2" username.
+    local auth_b64
+    auth_b64="$(printf 'oauth2:%s' "$CLONE_TOKEN" | base64 | tr -d '\n')"
+    GIT_CONFIG_COUNT=1 \
+      GIT_CONFIG_KEY_0="http.extraHeader" \
+      GIT_CONFIG_VALUE_0="Authorization: Basic $auth_b64" \
+      GIT_ASKPASS="" SSH_ASKPASS="" GIT_TERMINAL_PROMPT=0 \
+      git clone --depth 1 --branch "$INVENTORY_REF" "$INVENTORY_REPO" "$CLONE_DIR"
   else
     # Anonymous clone. Neutralize any inherited GIT_ASKPASS/SSH_ASKPASS from the
     # caller's environment (e.g. an editor or CI) and disable interactive prompts
@@ -305,11 +338,31 @@ clone_inventory() {
 }
 
 # ── Build the ansible command (discrete args, no eval) ───────────────────────
+# Produces three things:
+#   ANSIBLE_ARGS     — the human-readable ansible-playbook invocation (summary).
+#   CMD_ARGS         — what the container actually runs. Identical to ANSIBLE_ARGS
+#                      unless a vault password is present, in which case it is
+#                      wrapped so the password is echoed to ansible via a pipe.
+#   SECRET_ENV_ARGS  — `docker run` env flags for secrets (value-less `-e NAME`,
+#                      so the value is copied from this script's env, never argv).
 build_cmd_args() {
-  CMD_ARGS=(ansible-playbook -i "/inventory/$INVENTORY" "/playbooks/$PLAYBOOK")
-  [[ -n "$TAGS"       ]] && CMD_ARGS+=(--tags "$TAGS")
-  [[ -n "$LIMIT"      ]] && CMD_ARGS+=(--limit "$LIMIT")
-  [[ -n "$EXTRA_VARS" ]] && CMD_ARGS+=(--extra-vars "$EXTRA_VARS")
+  ANSIBLE_ARGS=(ansible-playbook -i "/inventory/$INVENTORY" "/playbooks/$PLAYBOOK")
+  [[ -n "$TAGS"       ]] && ANSIBLE_ARGS+=(--tags "$TAGS")
+  [[ -n "$LIMIT"      ]] && ANSIBLE_ARGS+=(--limit "$LIMIT")
+  [[ -n "$EXTRA_VARS" ]] && ANSIBLE_ARGS+=(--extra-vars "$EXTRA_VARS")
+
+  SECRET_ENV_ARGS=()
+  if [[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]]; then
+    # Pass the password into the container by NAME only (value comes from this
+    # script's env), then, INSIDE the container, echo it straight into ansible's
+    # vault-password reader via /dev/stdin. No temp file, no mounted helper, and
+    # the value never appears in argv. User values stay as positional args
+    # ("$@"), preserving the discrete-arg anti-injection guarantee (no eval).
+    SECRET_ENV_ARGS=(-e ANSIBLE_VAULT_PASSWORD)
+    CMD_ARGS=(sh -c 'echo "$ANSIBLE_VAULT_PASSWORD" | "$@" --vault-password-file /dev/stdin' _ "${ANSIBLE_ARGS[@]}")
+  else
+    CMD_ARGS=("${ANSIBLE_ARGS[@]}")
+  fi
   return 0
 }
 
@@ -326,13 +379,16 @@ print_summary() {
   Playbook       : /playbooks/$PLAYBOOK
   Image          : $IMAGE
   SSH key        : $SSH_KEY
-  Ansible cmd    : ${CMD_ARGS[*]}
+  Ansible cmd    : ${ANSIBLE_ARGS[*]}
+  Vault          : $([[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]] && echo "password via -e (stdin)" || echo "none")
   Log file       : $LOG_FILE
 ══════════════════════════════════════════════════
 EOF
 }
 
 print_docker_run() {
+  local vault_line=""
+  [[ ${#SECRET_ENV_ARGS[@]} -gt 0 ]] && vault_line=$'\n     -e ANSIBLE_VAULT_PASSWORD \\'
   cat <<EOF
 >> docker run command:
    docker run --rm \\
@@ -340,7 +396,7 @@ print_docker_run() {
      -v $CLONE_DIR:/inventory:ro \\
      -v $SSH_KEY:/root/.ssh/id_key:ro \\
      -e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key \\
-     -e ANSIBLE_COLLECTIONS_PATH=/collections \\
+     -e ANSIBLE_COLLECTIONS_PATH=/collections \\$vault_line
      $IMAGE \\
      ${CMD_ARGS[*]}
 EOF
@@ -387,12 +443,17 @@ run_debug() {
     -v "$SSH_KEY":/root/.ssh/id_key:ro \
     -e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key \
     -e ANSIBLE_COLLECTIONS_PATH=/collections \
+    ${SECRET_ENV_ARGS[@]+"${SECRET_ENV_ARGS[@]}"} \
     "$IMAGE" \
     sleep infinity
 
   local manual="ansible-playbook -i /inventory/$INVENTORY /playbooks/$PLAYBOOK"
   [[ -n "$TAGS"  ]] && manual="$manual --tags $TAGS"
   [[ -n "$LIMIT" ]] && manual="$manual --limit $LIMIT"
+  # ANSIBLE_VAULT_PASSWORD is already in the container's env (value-less -e), so
+  # inside the container just feed it to ansible via stdin — no file on disk.
+  [[ ${#SECRET_ENV_ARGS[@]} -gt 0 ]] && \
+    manual="echo \"\$ANSIBLE_VAULT_PASSWORD\" | $manual --vault-password-file /dev/stdin"
 
   cat <<EOF
 ══════════════ DEBUG MODE ══════════════
@@ -442,6 +503,7 @@ run_normal() {
     -v "$SSH_KEY":/root/.ssh/id_key:ro \
     -e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key \
     -e ANSIBLE_COLLECTIONS_PATH=/collections \
+    ${SECRET_ENV_ARGS[@]+"${SECRET_ENV_ARGS[@]}"} \
     "$IMAGE" \
     "${CMD_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
   RUN_EXIT="${PIPESTATUS[0]}"
@@ -459,6 +521,7 @@ run_normal() {
 
 main() {
   parse_args "$@"
+  load_secrets
   resolve_inventory_repo
   resolve_token
   resolve_log_file
