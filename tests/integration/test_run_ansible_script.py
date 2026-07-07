@@ -235,6 +235,63 @@ def test_debug_starts_idle_container_and_keeps_clone(tmp_path):
     assert clones, "debug mode must keep the clone dir"
 
 
+def test_debug_without_playbook_inventory_starts_bare_container(tmp_path):
+    # --debug with neither --playbook nor --inventory: no clone, no /inventory
+    # mount, container still starts idle.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    # git must NOT be called (nothing to clone); record if it ever is.
+    (bindir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        f'touch "{tmp_path}/git_was_called"\n'
+    )
+    (bindir / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$@" >> "{tmp_path}/docker_argv"\n'
+        "exit 0\n"
+    )
+    for f in ("git", "docker"):
+        os.chmod(bindir / f, 0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "SKIP_SSH_KEY_CHECK": "1", "CLONE_PARENT": str(tmp_path / "clones")}
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path),
+         "--debug", "--run-id", "bare1"],
+        capture_output=True, text=True, env=env,
+    )
+    assert res.returncode == 0, res.stderr
+    assert not (tmp_path / "git_was_called").exists(), "no inventory → git must not run"
+    argv = (tmp_path / "docker_argv").read_text()
+    assert "run -d" in argv
+    assert "sleep infinity" in argv
+    assert "ansible-debug-bare1" in argv
+    # No inventory mounted.
+    assert "/inventory:ro" not in argv
+    assert "docker exec -it ansible-debug-bare1 bash" in res.stdout
+
+
+def test_debug_requires_both_or_neither(tmp_path):
+    # Only one of the pair in debug mode is a mistake → rejected. Pass just
+    # --inventory (no --playbook) to exercise the guard.
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--inventory", "taipei/multinode.ini",
+         "--no-pull", "--log-dir", str(tmp_path), "--debug"],
+        capture_output=True, text=True,
+        env={**os.environ, "DRYRUN": "1", "SKIP_SSH_KEY_CHECK": "1"},
+    )
+    assert res.returncode == 2
+    assert "together" in (res.stderr + res.stdout).lower()
+
+
+def test_non_debug_still_requires_playbook_inventory(tmp_path):
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path)],
+        capture_output=True, text=True, env={**os.environ, "DRYRUN": "1"},
+    )
+    assert res.returncode == 2
+    assert "required" in (res.stderr + res.stdout).lower()
+
+
 def test_debug_and_dry_run_mutually_exclusive(tmp_path):
     res = _run(tmp_path, "--debug", "--dry-run")
     assert res.returncode == 2

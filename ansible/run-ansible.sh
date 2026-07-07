@@ -48,7 +48,7 @@ usage() {
   cat <<'EOF'
 Usage: run-ansible.sh --playbook <file> --inventory <repo-relative-path> [options]
 
-Required:
+Required (except with --debug, where both are optional):
   --playbook <file>       Playbook filename under playbooks/ (e.g. ping.yml)
   --inventory <path>      Inventory path RELATIVE to the inventory repo root
                           (e.g. taipei/multinode.ini)
@@ -76,7 +76,9 @@ Options:
   --ssh-key <path>        SSH private key to mount (default: ../data/ssh_keys/client_key)
   --dry-run               Clone inventory + print summary/commands; do NOT pull or run docker
   -d, --debug             Start the runner container idle (sleep infinity) for
-                          manual `docker exec` debugging; do NOT run ansible
+                          manual `docker exec` debugging; do NOT run ansible.
+                          --playbook/--inventory are optional here: omit both to
+                          start a bare container with no inventory mounted.
   -h, --help              Show this help
 
 The inventory repo is cloned fresh each run (under the fixed namespace
@@ -139,9 +141,18 @@ parse_args() {
     esac
   done
 
-  if [[ -z "$PLAYBOOK" || -z "$INVENTORY" ]]; then
-    echo "Error: --playbook and --inventory are required." >&2
+  # Debug mode starts an idle container for manual `docker exec`, so a
+  # playbook/inventory are optional there; every other mode needs both. When
+  # only one is supplied in debug mode, still require the pair (an inventory
+  # with no playbook, or vice versa, is almost certainly a mistake).
+  if [[ "$WANT_DEBUG" -ne 1 && ( -z "$PLAYBOOK" || -z "$INVENTORY" ) ]]; then
+    echo "Error: --playbook and --inventory are required (except with --debug)." >&2
     usage
+    exit 2
+  fi
+  if [[ "$WANT_DEBUG" -eq 1 ]] && \
+     { [[ -n "$PLAYBOOK" && -z "$INVENTORY" ]] || [[ -z "$PLAYBOOK" && -n "$INVENTORY" ]]; }; then
+    echo "Error: --playbook and --inventory must be given together (or both omitted with --debug)." >&2
     exit 2
   fi
 
@@ -285,6 +296,12 @@ cleanup() {
 }
 
 clone_inventory() {
+  # Debug mode may start an idle container with no inventory at all (nothing to
+  # clone or mount). Signal that with an empty CLONE_DIR and skip the clone.
+  if [[ -z "$INVENTORY" ]]; then
+    CLONE_DIR=""
+    return 0
+  fi
   # DooD: the clone dir is bind-mounted into the ansible container, and -v
   # resolves on the HOST daemon. So clone beside this script (host-consistent),
   # NOT control_node's private /tmp. Override with CLONE_PARENT if needed.
@@ -346,10 +363,15 @@ clone_inventory() {
 #   SECRET_ENV_ARGS  — `docker run` env flags for secrets (value-less `-e NAME`,
 #                      so the value is copied from this script's env, never argv).
 build_cmd_args() {
-  ANSIBLE_ARGS=(ansible-playbook -i "/inventory/$INVENTORY" "/playbooks/$PLAYBOOK")
-  [[ -n "$TAGS"       ]] && ANSIBLE_ARGS+=(--tags "$TAGS")
-  [[ -n "$LIMIT"      ]] && ANSIBLE_ARGS+=(--limit "$LIMIT")
-  [[ -n "$EXTRA_VARS" ]] && ANSIBLE_ARGS+=(--extra-vars "$EXTRA_VARS")
+  # Debug mode may run with no playbook/inventory (idle container); there is no
+  # ansible command to build then — only the secret env flags still matter.
+  ANSIBLE_ARGS=()
+  if [[ -n "$PLAYBOOK" && -n "$INVENTORY" ]]; then
+    ANSIBLE_ARGS=(ansible-playbook -i "/inventory/$INVENTORY" "/playbooks/$PLAYBOOK")
+    [[ -n "$TAGS"       ]] && ANSIBLE_ARGS+=(--tags "$TAGS")
+    [[ -n "$LIMIT"      ]] && ANSIBLE_ARGS+=(--limit "$LIMIT")
+    [[ -n "$EXTRA_VARS" ]] && ANSIBLE_ARGS+=(--extra-vars "$EXTRA_VARS")
+  fi
 
   SECRET_ENV_ARGS=()
   if [[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]]; then
@@ -359,9 +381,9 @@ build_cmd_args() {
     # the value never appears in argv. User values stay as positional args
     # ("$@"), preserving the discrete-arg anti-injection guarantee (no eval).
     SECRET_ENV_ARGS=(-e ANSIBLE_VAULT_PASSWORD)
-    CMD_ARGS=(sh -c 'echo "$ANSIBLE_VAULT_PASSWORD" | "$@" --vault-password-file /dev/stdin' _ "${ANSIBLE_ARGS[@]}")
+    CMD_ARGS=(sh -c 'echo "$ANSIBLE_VAULT_PASSWORD" | "$@" --vault-password-file /dev/stdin' _ ${ANSIBLE_ARGS[@]+"${ANSIBLE_ARGS[@]}"})
   else
-    CMD_ARGS=("${ANSIBLE_ARGS[@]}")
+    CMD_ARGS=(${ANSIBLE_ARGS[@]+"${ANSIBLE_ARGS[@]}"})
   fi
   return 0
 }
@@ -371,15 +393,15 @@ print_summary() {
   cat <<EOF
 ══════════════════ RUN SUMMARY ══════════════════
   Script version : $SCRIPT_VERSION
-  Inventory repo : $INVENTORY_REPO
+  Inventory repo : $([[ -n "$INVENTORY" ]] && echo "$INVENTORY_REPO" || echo "(none — debug)")
   Inventory ref  : $INVENTORY_REF
   Auth           : $(auth_label)
-  Clone dir      : $CLONE_DIR
-  Inventory file : /inventory/$INVENTORY
-  Playbook       : /playbooks/$PLAYBOOK
+  Clone dir      : $([[ -n "$CLONE_DIR" ]] && echo "$CLONE_DIR" || echo "(none)")
+  Inventory file : $([[ -n "$INVENTORY" ]] && echo "/inventory/$INVENTORY" || echo "(none)")
+  Playbook       : $([[ -n "$PLAYBOOK" ]] && echo "/playbooks/$PLAYBOOK" || echo "(none)")
   Image          : $IMAGE
   SSH key        : $SSH_KEY
-  Ansible cmd    : ${ANSIBLE_ARGS[*]}
+  Ansible cmd    : $([[ ${#ANSIBLE_ARGS[@]} -gt 0 ]] && echo "${ANSIBLE_ARGS[*]}" || echo "(none — idle container)")
   Vault          : $([[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]] && echo "password via -e (stdin)" || echo "none")
   Log file       : $LOG_FILE
 ══════════════════════════════════════════════════
@@ -418,8 +440,11 @@ run_dry_run() {
 run_debug() {
   if [[ -n "$RUN_ID" ]]; then
     DEBUG_CONTAINER="ansible-debug-$RUN_ID"
-  else
+  elif [[ -n "$CLONE_DIR" ]]; then
     DEBUG_CONTAINER="ansible-debug-$(basename "$CLONE_DIR" | sed 's/^ansible-inventory\.//')"
+  else
+    # No run-id and no inventory clone — name it by PID so it stays unique.
+    DEBUG_CONTAINER="ansible-debug-$$"
   fi
 
   print_summary
@@ -434,12 +459,17 @@ run_debug() {
     docker pull "$IMAGE"
   fi
 
-  # Keep the clone dir alive for the running container.
+  # Mount /inventory only when an inventory was cloned; a bare debug container
+  # (no --inventory) starts with nothing mounted there.
+  local inv_mount=()
+  [[ -n "$CLONE_DIR" ]] && inv_mount=(-v "$CLONE_DIR":/inventory:ro)
+
+  # Keep the clone dir (if any) alive for the running container.
   trap - EXIT
 
   docker run -d --name "$DEBUG_CONTAINER" \
     --add-host host.docker.internal:host-gateway \
-    -v "$CLONE_DIR":/inventory:ro \
+    ${inv_mount[@]+"${inv_mount[@]}"} \
     -v "$SSH_KEY":/root/.ssh/id_key:ro \
     -e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key \
     -e ANSIBLE_COLLECTIONS_PATH=/collections \
@@ -447,13 +477,23 @@ run_debug() {
     "$IMAGE" \
     sleep infinity
 
-  local manual="ansible-playbook -i /inventory/$INVENTORY /playbooks/$PLAYBOOK"
-  [[ -n "$TAGS"  ]] && manual="$manual --tags $TAGS"
-  [[ -n "$LIMIT" ]] && manual="$manual --limit $LIMIT"
-  # ANSIBLE_VAULT_PASSWORD is already in the container's env (value-less -e), so
-  # inside the container just feed it to ansible via stdin — no file on disk.
-  [[ ${#SECRET_ENV_ARGS[@]} -gt 0 ]] && \
-    manual="echo \"\$ANSIBLE_VAULT_PASSWORD\" | $manual --vault-password-file /dev/stdin"
+  local manual
+  if [[ -n "$INVENTORY" && -n "$PLAYBOOK" ]]; then
+    manual="ansible-playbook -i /inventory/$INVENTORY /playbooks/$PLAYBOOK"
+    [[ -n "$TAGS"  ]] && manual="$manual --tags $TAGS"
+    [[ -n "$LIMIT" ]] && manual="$manual --limit $LIMIT"
+    # ANSIBLE_VAULT_PASSWORD is already in the container's env (value-less -e), so
+    # inside the container just feed it to ansible via stdin — no file on disk.
+    [[ ${#SECRET_ENV_ARGS[@]} -gt 0 ]] && \
+      manual="echo \"\$ANSIBLE_VAULT_PASSWORD\" | $manual --vault-password-file /dev/stdin"
+  else
+    manual="# no inventory mounted; test connectivity ad-hoc, e.g.:
+  ansible all -i <your-inventory> -m ping"
+  fi
+
+  local cleanup_hint="  docker rm -f $DEBUG_CONTAINER"
+  [[ -n "$CLONE_DIR" ]] && cleanup_hint="$cleanup_hint
+  rm -rf $CLONE_DIR"
 
   cat <<EOF
 ══════════════ DEBUG MODE ══════════════
@@ -466,8 +506,7 @@ Run the playbook manually inside:
   $manual
 
 When done, clean up:
-  docker rm -f $DEBUG_CONTAINER
-  rm -rf $CLONE_DIR
+$cleanup_hint
 ══════════════════════════════════════════
 EOF
   exit 0
