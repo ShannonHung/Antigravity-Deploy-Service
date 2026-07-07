@@ -424,9 +424,10 @@ def _run_with_recording_git(tmp_path, *extra, env_extra=None):
     # The recording git ignores --branch, so unset INVENTORY_REPO to exercise the
     # repo-name → URL builder (otherwise the inherited env could override it).
     env.pop("INVENTORY_REPO", None)
-    # A stray INVENTORY_TOKEN in the ambient env would turn "anonymous" tests
-    # into authenticated ones; drop it so each test controls auth explicitly.
+    # A stray INVENTORY_TOKEN / INVENTORY_TOKEN_USER in the ambient env would
+    # contaminate auth; drop them so each test controls auth explicitly.
     env.pop("INVENTORY_TOKEN", None)
+    env.pop("INVENTORY_TOKEN_USER", None)
     if env_extra:
         env.update(env_extra)
     res = subprocess.run(
@@ -525,6 +526,20 @@ def test_secret_path_token_drives_clone_auth(tmp_path):
     assert secret not in res.stdout and secret not in res.stderr
     assert _decode_header_token(tmp_path) == f"oauth2:{secret}"
     assert "Auth           : token (env)" in res.stdout
+
+
+def test_secret_path_token_user_sets_basic_auth_username(tmp_path):
+    # A GitLab deploy token authenticates as its own username, not oauth2.
+    secret = "gldt-DEPLOYTOKEN789"
+    sec = tmp_path / "secrets.env"
+    sec.write_text(f"INVENTORY_TOKEN_USER=shannon\nINVENTORY_TOKEN={secret}\n")
+    os.chmod(sec, 0o600)
+    res = _run_with_recording_git(tmp_path, "--secret-path", str(sec))
+    assert res.returncode == 0, res.stderr
+    # Basic auth carries "<deploy-token-username>:<token>", not oauth2:<token>.
+    assert _decode_header_token(tmp_path) == f"shannon:{secret}"
+    assert secret not in (tmp_path / "git_argv").read_text()
+    assert secret not in res.stdout and secret not in res.stderr
 
 
 def test_secret_path_rejects_group_readable_file(tmp_path):

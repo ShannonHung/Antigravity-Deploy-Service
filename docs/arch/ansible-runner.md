@@ -281,7 +281,8 @@ load_secrets() {
 #### token：走 git env-config，不進 argv / URL / `.git/config`
 
 ```bash
-auth_b64="$(printf 'oauth2:%s' "$CLONE_TOKEN" | base64 | tr -d '\n')"
+auth_user="${INVENTORY_TOKEN_USER:-oauth2}"          # PAT→oauth2；deploy token→其 username
+auth_b64="$(printf '%s:%s' "$auth_user" "$CLONE_TOKEN" | base64 | tr -d '\n')"
 GIT_CONFIG_COUNT=1 \
   GIT_CONFIG_KEY_0="http.extraHeader" \
   GIT_CONFIG_VALUE_0="Authorization: Basic $auth_b64" \
@@ -293,6 +294,12 @@ token 以 HTTP Authorization header 經 git 的**環境式設定**（`GIT_CONFIG
 token 不會被寫進 clone 的 `.git/config` —— 這很重要，因為那個目錄稍後會被
 `-v ...:/inventory:ro` 掛進 ansible container。token 全程不進 argv（`ps` 看不到）、不
 進 URL、不進任何 log / summary。
+
+> **username 依 token 類型而定**：Basic auth 是 `<username>:<token>`。GitLab **PAT**
+> 會忽略 username（慣例填 `oauth2`）；GitLab **deploy token** 則是**用它自己的
+> username 認證**。所以 username 由 `INVENTORY_TOKEN_USER`（放在 secret 檔裡、跟
+> `INVENTORY_TOKEN` 一起）控制，預設 `oauth2`。deploy token 的話設成它的 username，例如
+> `INVENTORY_TOKEN_USER=shannon`。
 
 #### vault：自動產生密碼檔、預設 `ANSIBLE_VAULT_PASSWORD_FILE`
 

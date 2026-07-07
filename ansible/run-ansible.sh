@@ -65,9 +65,12 @@ Options:
   --inventory-repo-name <name>  Inventory repo under the fixed namespace to clone
                           (default: my-ansible-inventory; e.g. ansible-inventory-v2)
   --secret-path <path>    KEY=VALUE env file sourced before the run. Recognised
-                          keys: INVENTORY_TOKEN (private inventory clone) and
-                          ANSIBLE_VAULT_PASSWORD (ansible-vault decrypt). The file
-                          must be chmod 600/400 (not group/other-accessible).
+                          keys: INVENTORY_TOKEN (private inventory clone),
+                          INVENTORY_TOKEN_USER (Basic-auth username; default
+                          oauth2 for a PAT, set to the deploy token's username
+                          for a GitLab deploy token) and ANSIBLE_VAULT_PASSWORD
+                          (ansible-vault decrypt). The file must be chmod 600/400
+                          (not group/other-accessible).
                           Secret VALUES are never accepted as CLI args, never
                           logged, and never placed in argv/URL. Also honoured from
                           the SECRET_PATH env var.
@@ -350,10 +353,14 @@ clone_inventory() {
     #                    written to the clone's .git/config (which is later
     #                    bind-mounted read-only into the ansible container)
     #   * any log/summary output
-    # For a GitLab PAT, Basic auth with any username + the token as password
-    # authenticates; we use the conventional "oauth2" username.
+    # Basic auth is "<username>:<token>". The username matters by token type:
+    #   * GitLab PAT          → username is ignored (convention: oauth2)
+    #   * GitLab deploy token → authenticates as the token's OWN username
+    # So the username is configurable via INVENTORY_TOKEN_USER (set it in the
+    # secret file next to INVENTORY_TOKEN); it defaults to oauth2 for PATs.
+    local auth_user="${INVENTORY_TOKEN_USER:-oauth2}"
     local auth_b64
-    auth_b64="$(printf 'oauth2:%s' "$CLONE_TOKEN" | base64 | tr -d '\n')"
+    auth_b64="$(printf '%s:%s' "$auth_user" "$CLONE_TOKEN" | base64 | tr -d '\n')"
     GIT_CONFIG_COUNT=1 \
       GIT_CONFIG_KEY_0="http.extraHeader" \
       GIT_CONFIG_VALUE_0="Authorization: Basic $auth_b64" \
