@@ -294,31 +294,33 @@ token 不會被寫進 clone 的 `.git/config` —— 這很重要，因為那個
 `-v ...:/inventory:ro` 掛進 ansible container。token 全程不進 argv（`ps` 看不到）、不
 進 URL、不進任何 log / summary。
 
-#### vault：自動產生 client、預設 `ANSIBLE_VAULT_PASSWORD_FILE`
+#### vault：自動產生密碼檔、預設 `ANSIBLE_VAULT_PASSWORD_FILE`
 
 ansible-core 沒有原生讀 `ANSIBLE_VAULT_PASSWORD` env 的能力，只認
-`ANSIBLE_VAULT_PASSWORD_FILE`（指向容器內一個檔案／可執行腳本）。所以只要 sourced
-到 `ANSIBLE_VAULT_PASSWORD`，`ensure_vault_client()` 就會在腳本旁**自動產生**一支
-client（`.ansible_vault`，已 gitignore）：
+`ANSIBLE_VAULT_PASSWORD_FILE`（指向容器內一個檔案）。所以只要 sourced 到
+`ANSIBLE_VAULT_PASSWORD`，`ensure_vault_client()` 就在腳本旁**自動產生**一個密碼檔
+（`.ansible_vault`，chmod 600、非可執行、已 gitignore、每次執行重寫）：
 
-```sh
-#!/bin/sh
-printf '%s' "$ANSIBLE_VAULT_PASSWORD"      # 本身不含任何 secret
+```bash
+( umask 077; printf '%s' "$ANSIBLE_VAULT_PASSWORD" > "$VAULT_PASS_FILE" )
 ```
 
 然後 `docker run` 這樣接：
 
 ```bash
--v "$VAULT_PASS_FILE":/ansible_vault:ro \      # 把 client 掛進容器（DooD host 一致）
--e ANSIBLE_VAULT_PASSWORD \                    # 不帶值：由 host 環境複製，值不進 argv
--e ANSIBLE_VAULT_PASSWORD_FILE=/ansible_vault  # 預設指好，ansible 自動解密
+-v "$VAULT_PASS_FILE":/ansible_vault:ro \      # 把密碼檔掛進容器（DooD host 一致）
+-e ANSIBLE_VAULT_PASSWORD_FILE=/ansible_vault  # 預設指好，ansible 直接讀檔解密
 ```
 
-考量點：**client 本身沒有 secret**（每次執行重寫、不會 drift），真正的密碼靠
-value-less 的 `-e ANSIBLE_VAULT_PASSWORD` 從 host 環境複製進去，**不會出現在 argv 或
-log**。因為 `ANSIBLE_VAULT_PASSWORD_FILE` 已預設，`ansible-playbook` 不用再加任何 vault
-參數——normal run 與 `--debug` 容器裡手動跑都直接能解密。密碼值會存在容器行程的環境
-（`/proc/<pid>/environ`，同機 root 可見），信任邊界是「能登入 control_node 的人」。
+考量點：ansible 直接讀掛進去的檔當密碼，**argv 裡只會有「路徑」、不會有密碼**，log／
+summary 也不會出現密碼。因為 `ANSIBLE_VAULT_PASSWORD_FILE` 已預設，`ansible-playbook`
+不用再加任何 vault 參數——normal run 與 `--debug` 容器裡手動跑都直接能解密。
+
+> **取捨**：這個 `.ansible_vault` 檔**含明文密碼**（跟 `secrets.env` 一樣落在
+> control_node 上，chmod 600、gitignored）。這是為了「直接 mount 一個檔」的極簡做法
+> 換來的——省掉了「產生一支讀 env 的 client 腳本 + 用 value-less `-e` 把密碼灌進容器
+> 環境」那層 indirection。若你偏好「掛進去的檔不含 secret」，那層 client-script 版本
+> 也是可行的替代。
 
 ### 2.9 `--debug` 可省略 playbook / inventory
 
