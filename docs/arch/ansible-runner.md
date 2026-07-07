@@ -251,6 +251,87 @@ fi
 退出。`tests/integration/test_run_ansible_script.py` 靠它做單元測試，**不需要網路或
 docker**。撰寫這類腳本時保留一個純參數解析的退出點，會讓測試輕鬆很多。
 
+### 2.8 Secrets：inventory token 與 vault 密碼（`--secret-path`）
+
+> **SCRIPT_VERSION 2.0.0 起**：舊的 `--token-file` 與 GIT_ASKPASS helper 已移除，統
+> 一改成「source 一個 env 檔」。
+
+私有 inventory clone 需要 `INVENTORY_TOKEN`，ansible-vault 解密需要
+`ANSIBLE_VAULT_PASSWORD`。這兩個 secret 都由 **control_node 本機**的一個 KEY=VALUE
+env 檔提供，用 `--secret-path <path>`（或 `SECRET_PATH` 環境變數）指定：
+
+```bash
+# ~/.secrets.env（chmod 600）
+INVENTORY_TOKEN=glpat-xxx
+ANSIBLE_VAULT_PASSWORD=s3cr3t
+```
+
+```bash
+load_secrets() {
+  # source 等於執行程式碼 → 拒絕 group/other 可存取的檔案（否則可寫 = RCE）
+  [[ "${mode: -2}" == "00" ]] || exit 2      # 必須 chmod 600/400
+  set -a; . "$SECRET_PATH"; set +a           # 匯入並 export
+}
+```
+
+考量點：**secret 只活在真正用它的機器上**，不放進白名單 JSON（那會進 git、也會被
+`get_user_commands` API 回傳）、不經 deploy-service、不過網路。`set -a` 讓匯入的 key
+自動 export，後面 git 與 `docker run -e` 才拿得到。
+
+#### token：走 git env-config，不進 argv / URL / `.git/config`
+
+```bash
+auth_b64="$(printf 'oauth2:%s' "$CLONE_TOKEN" | base64 | tr -d '\n')"
+GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0="http.extraHeader" \
+  GIT_CONFIG_VALUE_0="Authorization: Basic $auth_b64" \
+  git clone --depth 1 --branch "$INVENTORY_REF" "$INVENTORY_REPO" "$CLONE_DIR"
+```
+
+token 以 HTTP Authorization header 經 git 的**環境式設定**（`GIT_CONFIG_*`，git ≥
+2.31）注入，只存在於 git 行程的環境（base64）。因為 clone 用的是**乾淨 URL**，所以
+token 不會被寫進 clone 的 `.git/config` —— 這很重要，因為那個目錄稍後會被
+`-v ...:/inventory:ro` 掛進 ansible container。token 全程不進 argv（`ps` 看不到）、不
+進 URL、不進任何 log / summary。
+
+#### vault：自動產生 client、預設 `ANSIBLE_VAULT_PASSWORD_FILE`
+
+ansible-core 沒有原生讀 `ANSIBLE_VAULT_PASSWORD` env 的能力，只認
+`ANSIBLE_VAULT_PASSWORD_FILE`（指向容器內一個檔案／可執行腳本）。所以只要 sourced
+到 `ANSIBLE_VAULT_PASSWORD`，`ensure_vault_client()` 就會在腳本旁**自動產生**一支
+client（`.ansible_vault`，已 gitignore）：
+
+```sh
+#!/bin/sh
+printf '%s' "$ANSIBLE_VAULT_PASSWORD"      # 本身不含任何 secret
+```
+
+然後 `docker run` 這樣接：
+
+```bash
+-v "$VAULT_PASS_FILE":/ansible_vault:ro \      # 把 client 掛進容器（DooD host 一致）
+-e ANSIBLE_VAULT_PASSWORD \                    # 不帶值：由 host 環境複製，值不進 argv
+-e ANSIBLE_VAULT_PASSWORD_FILE=/ansible_vault  # 預設指好，ansible 自動解密
+```
+
+考量點：**client 本身沒有 secret**（每次執行重寫、不會 drift），真正的密碼靠
+value-less 的 `-e ANSIBLE_VAULT_PASSWORD` 從 host 環境複製進去，**不會出現在 argv 或
+log**。因為 `ANSIBLE_VAULT_PASSWORD_FILE` 已預設，`ansible-playbook` 不用再加任何 vault
+參數——normal run 與 `--debug` 容器裡手動跑都直接能解密。密碼值會存在容器行程的環境
+（`/proc/<pid>/environ`，同機 root 可見），信任邊界是「能登入 control_node 的人」。
+
+### 2.9 `--debug` 可省略 playbook / inventory
+
+`-d` 是「起一個 idle 容器（`sleep infinity`）讓人 `docker exec` 進去戳」的模式，所以
+它不一定要有 playbook / inventory：
+
+- **兩個都省略** → 跳過 inventory clone（git 完全不跑）、不掛 `/inventory`，起一個純
+  debug 容器；vault 若有設定仍會掛好、env 仍預設（見 §2.8）。
+- **兩個都給** → 照常 clone + 掛 `/inventory`，行為不變。
+- **只給一個** → 視為筆誤，直接報錯退出。
+
+非 debug 模式仍強制要 playbook + inventory。
+
 ---
 
 ## 3. 怎麼看 log（即時 / 結束後）
@@ -509,6 +590,10 @@ make dev                                                    # deploy-service, po
   裝在可重建的 image。
 - **argv 陣列、不 `eval`**：承重的防注入保證。
 - **每次 clone inventory、每次 pull image**：杜絕過期 artifact。
+- **secret 走 `--secret-path` source（token 用 git env-config、vault 自動產生 client）**：
+  secret 只活在 control_node 本機、不進 git／不過 deploy-service；token 不進 argv／URL／
+  `.git/config`，vault 密碼靠 value-less `-e` 進容器、`ANSIBLE_VAULT_PASSWORD_FILE` 預設
+  好讓 ansible 自動解密（normal 與 `--debug` 皆然）。
 - **clone 路徑 host 一致**：DooD 下 `-v` 對 host 解析，否則掛載對不上。
 - **`${PIPESTATUS[0]}` + `tee`**：image 不寫 log，靠 tee 寫檔；取 pipeline 左端的碼才
   能讓 ansible 的失敗穿透回來（pipeline 後還要寫終止標記，故用 `set +e` 取代 pipefail）。
