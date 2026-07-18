@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     INVENTORY_API_TOKEN: str = "fake-inventory-token"
     INVENTORY_API_TIMEOUT_SECONDS: float = 5.0
     INVENTORY_API_VERIFY_SSL: bool = True
+    # CA cert file path for verifying the Inventory API's TLS cert.
+    # When set, it takes precedence over INVENTORY_API_VERIFY_SSL (mirrors GITLAB_CA).
+    INVENTORY_CA: str = ""
     # JSON string mapping node_type → bastion_type, e.g.:
     # BASTION_NODE_TYPE_MAP='{"baremetal": "type1", "virtual-machine": "type2"}'
     BASTION_NODE_TYPE_MAP: Dict[str, str] = {}

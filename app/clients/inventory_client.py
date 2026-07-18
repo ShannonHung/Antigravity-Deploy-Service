@@ -77,7 +77,7 @@ class InventoryClient(InventoryRepository):
         base_url: str,
         token_manager: InventoryTokenManager,
         timeout: float,
-        verify_ssl: bool = True,
+        verify_ssl: str | bool = True,
         transport: Optional[httpx.BaseTransport] = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")

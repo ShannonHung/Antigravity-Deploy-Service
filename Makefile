@@ -9,6 +9,9 @@ UV     := uv
 PYTHON := $(UV) run python
 PYTEST := $(UV) run pytest
 
+# certs 目標的 SAN extfile 用了 bash 的 process substitution <(...)，需要 bash 執行
+SHELL := /bin/bash
+
 .DEFAULT_GOAL := help
 
 # ─── Help ────────────────────────────────────────────────────────────────────
@@ -21,7 +24,8 @@ help:
 	@echo "  make start        啟動伺服器（使用 .env，不帶 APP_ENV）"
 	@echo "  make dev          啟動開發伺服器（使用 .env + .env.dev，熱重載）"
 	@echo "  make prod         啟動生產伺服器（使用 .env + .env.prod）"
-	@echo "  make inventory-api 啟動本機假 Inventory API（port 9001）"
+	@echo "  make inventory-api 啟動本機假 Inventory API（HTTPS，port 9001）"
+	@echo "  make certs         產生 fake-api HTTPS 憑證（Root CA + server cert）"
 	@echo ""
 	@echo "  make test         執行測試（不含 e2e；日常開發、CI 用這個）"
 	@echo "  make test-all     執行全部測試（含 e2e；需先 redis-up + setup-ssh-nodes）"
@@ -73,7 +77,26 @@ prod:
 # inventory-api: 啟動本機假 Inventory API (port 9001)
 .PHONY: inventory-api
 inventory-api:
-	APP_ENV=dev $(UV) run uvicorn fake-api.main:app --reload --port 9001
+	APP_ENV=dev $(UV) run uvicorn fake-api.main:app --reload --port 9001 \
+		--ssl-keyfile fake-api/certs/server.key \
+		--ssl-certfile fake-api/certs/server.crt
+
+# certs: 產生本機 fake-api HTTPS 用的兩層 PKI（Root CA + server 憑證）
+.PHONY: certs
+certs:
+	mkdir -p fake-api/certs
+	openssl genrsa -out fake-api/certs/ca.key 4096
+	openssl req -x509 -new -nodes -key fake-api/certs/ca.key -sha256 -days 3650 \
+		-subj "/CN=fake-inventory-local-ca" -out fake-api/certs/ca.crt
+	openssl genrsa -out fake-api/certs/server.key 2048
+	openssl req -new -key fake-api/certs/server.key -subj "/CN=localhost" \
+		-out fake-api/certs/server.csr
+	openssl x509 -req -in fake-api/certs/server.csr \
+		-CA fake-api/certs/ca.crt -CAkey fake-api/certs/ca.key -CAcreateserial \
+		-days 825 -sha256 -out fake-api/certs/server.crt \
+		-extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1")
+	cp fake-api/certs/ca.crt data/ca.crt
+	@echo "✅ certs generated in fake-api/certs/ and ca.crt copied to data/"
 
 # ─── Test ────────────────────────────────────────────────────────────────────
 # 測試分層：
