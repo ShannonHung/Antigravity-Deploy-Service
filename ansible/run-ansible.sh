@@ -19,13 +19,19 @@ set -euo pipefail
 INVENTORY_NAMESPACE="https://gitlab.com/ShannonHung"
 INVENTORY_REPO_NAME="my-ansible-inventory"   # --inventory-repo-name <name>
 IMAGE="shannonhung/ansible-runner:latest"
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="2.0.0"
+# Where the auto-generated vault password file is mounted INSIDE the container;
+# ANSIBLE_VAULT_PASSWORD_FILE is pointed here so ansible finds it automatically.
+VAULT_PASS_CONTAINER="/ansible_vault"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────
 PLAYBOOK=""
 INVENTORY=""               # path RELATIVE to the inventory repo root
 INVENTORY_REF="main"       # branch/tag of the inventory repo to clone
-TOKEN_FILE=""              # --token-file <path>: read clone token from a file
+SECRET_PATH="${SECRET_PATH:-}"  # --secret-path <path>: a KEY=VALUE env file
+                           # sourced before the run (e.g. INVENTORY_TOKEN for the
+                           # inventory clone, ANSIBLE_VAULT_PASSWORD for vault).
+                           # Also honoured from the SECRET_PATH env var.
 TAGS=""
 LIMIT=""
 EXTRA_VARS=""
@@ -40,12 +46,16 @@ RUN_ID=""                  # per-run id from deploy-service; log is <run_id>.log
 LOG_RETENTION_DAYS=3       # prune <log-dir>/*.log older than this many days
 SSH_KEY="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/data/ssh_keys/client_key"
 MIN_VERSION=""             # --min-version <X.Y.Z>: self-guard minimum
+# Host path of the auto-generated vault password file. Lives beside this script
+# (host-consistent for the DooD bind mount, same reasoning as the clone dir).
+# Overridable via the VAULT_PASS_FILE env var (used by tests).
+VAULT_PASS_FILE="${VAULT_PASS_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.ansible_vault}"
 
 usage() {
   cat <<'EOF'
 Usage: run-ansible.sh --playbook <file> --inventory <repo-relative-path> [options]
 
-Required:
+Required (except with --debug, where both are optional):
   --playbook <file>       Playbook filename under playbooks/ (e.g. ping.yml)
   --inventory <path>      Inventory path RELATIVE to the inventory repo root
                           (e.g. taipei/multinode.ini)
@@ -54,10 +64,22 @@ Options:
   --inventory-ref <ref>   Branch/tag of the inventory repo to clone (default: main)
   --inventory-repo-name <name>  Inventory repo under the fixed namespace to clone
                           (default: my-ansible-inventory; e.g. ansible-inventory-v2)
-  --token-file <path>     Read the clone auth token from this file. Token may also
-                          come from the INVENTORY_TOKEN env var. The token is NEVER
-                          accepted as a CLI value, never logged, and never placed in
-                          the clone URL (passed to git via GIT_ASKPASS only).
+  --secret-path <path>    KEY=VALUE env file sourced before the run. Recognised
+                          keys: INVENTORY_TOKEN (private inventory clone),
+                          INVENTORY_TOKEN_USER (Basic-auth username; default
+                          oauth2 for a PAT, set to the deploy token's username
+                          for a GitLab deploy token) and ANSIBLE_VAULT_PASSWORD
+                          (ansible-vault decrypt). The file must be chmod 600/400
+                          (not group/other-accessible).
+                          Secret VALUES are never accepted as CLI args, never
+                          logged, and never placed in argv/URL. Also honoured from
+                          the SECRET_PATH env var.
+                          When ANSIBLE_VAULT_PASSWORD is present, a vault password
+                          file (.ansible_vault, chmod 600, gitignored) is generated
+                          beside this script, mounted into the container, and
+                          ANSIBLE_VAULT_PASSWORD_FILE is preset — so ansible (and
+                          manual runs in a --debug container) decrypt with no
+                          extra flags.
   --tags <tags>           Comma-separated ansible --tags
   --limit <pattern>       ansible --limit host/group pattern
   --extra-vars <k=v ...>  ansible --extra-vars string
@@ -70,19 +92,24 @@ Options:
   --ssh-key <path>        SSH private key to mount (default: ../data/ssh_keys/client_key)
   --dry-run               Clone inventory + print summary/commands; do NOT pull or run docker
   -d, --debug             Start the runner container idle (sleep infinity) for
-                          manual `docker exec` debugging; do NOT run ansible
+                          manual `docker exec` debugging; do NOT run ansible.
+                          --playbook/--inventory are optional here: omit both to
+                          start a bare container with no inventory mounted.
   -h, --help              Show this help
 
 The inventory repo is cloned fresh each run (under the fixed namespace
 https://gitlab.com/ShannonHung) and removed afterward. Select it with
---inventory-repo-name; private repos authenticate via INVENTORY_TOKEN or
---token-file.
+--inventory-repo-name; private repos authenticate via INVENTORY_TOKEN, which
+(together with ANSIBLE_VAULT_PASSWORD) is typically supplied by --secret-path.
 
 Example:
   ./run-ansible.sh --playbook ping.yml --inventory taipei/multinode.ini --limit node1
   ./run-ansible.sh -d --playbook ping.yml --inventory taipei/multinode.ini --limit node1
-  INVENTORY_TOKEN=glpat-xxx ./run-ansible.sh --inventory-repo-name ansible-inventory-v2 \
+  ./run-ansible.sh --secret-path ~/.secrets.env --inventory-repo-name ansible-inventory-v2 \
       --playbook ping.yml --inventory taipei/multinode.ini
+  # ~/.secrets.env (chmod 600):
+  #   INVENTORY_TOKEN=glpat-xxx
+  #   ANSIBLE_VAULT_PASSWORD=s3cr3t
 EOF
 }
 
@@ -110,7 +137,7 @@ parse_args() {
       --inventory)           INVENTORY="$2"; shift 2 ;;
       --inventory-ref)       INVENTORY_REF="$2"; shift 2 ;;
       --inventory-repo-name) INVENTORY_REPO_NAME="$2"; shift 2 ;;
-      --token-file)          TOKEN_FILE="$2"; shift 2 ;;
+      --secret-path)         SECRET_PATH="$2"; shift 2 ;;
       --tags)                TAGS="$2"; shift 2 ;;
       --limit)               LIMIT="$2"; shift 2 ;;
       --extra-vars)          EXTRA_VARS="$2"; shift 2 ;;
@@ -130,9 +157,18 @@ parse_args() {
     esac
   done
 
-  if [[ -z "$PLAYBOOK" || -z "$INVENTORY" ]]; then
-    echo "Error: --playbook and --inventory are required." >&2
+  # Debug mode starts an idle container for manual `docker exec`, so a
+  # playbook/inventory are optional there; every other mode needs both. When
+  # only one is supplied in debug mode, still require the pair (an inventory
+  # with no playbook, or vice versa, is almost certainly a mistake).
+  if [[ "$WANT_DEBUG" -ne 1 && ( -z "$PLAYBOOK" || -z "$INVENTORY" ) ]]; then
+    echo "Error: --playbook and --inventory are required (except with --debug)." >&2
     usage
+    exit 2
+  fi
+  if [[ "$WANT_DEBUG" -eq 1 ]] && \
+     { [[ -n "$PLAYBOOK" && -z "$INVENTORY" ]] || [[ -z "$PLAYBOOK" && -n "$INVENTORY" ]]; }; then
+    echo "Error: --playbook and --inventory must be given together (or both omitted with --debug)." >&2
     exit 2
   fi
 
@@ -157,10 +193,10 @@ parse_args() {
     exit 2
   fi
 
-  # --token-file must point at a readable file if given (the token VALUE is read
-  # later, in resolve_token, so failures here don't depend on docker/git).
-  if [[ -n "$TOKEN_FILE" && ! -f "$TOKEN_FILE" ]]; then
-    echo "Error: --token-file not found: $TOKEN_FILE" >&2
+  # --secret-path must point at a readable file if given (its VALUES are sourced
+  # later, in load_secrets, which also enforces the 600/400 permission bound).
+  if [[ -n "$SECRET_PATH" && ! -f "$SECRET_PATH" ]]; then
+    echo "Error: --secret-path not found: $SECRET_PATH" >&2
     exit 2
   fi
 
@@ -219,17 +255,55 @@ resolve_inventory_repo() {
   fi
 }
 
-# Resolve the clone token (optional). Precedence: --token-file > INVENTORY_TOKEN
-# env > none (anonymous). Sets CLONE_TOKEN and AUTH_SOURCE (file|env|anonymous).
-# The token VALUE is never echoed; only its source is reported.
+# Load secrets from --secret-path (a KEY=VALUE env file) into the environment so
+# the rest of the run can consume them (INVENTORY_TOKEN for the clone,
+# ANSIBLE_VAULT_PASSWORD for vault). `set -a` exports every key the file defines
+# so `docker run -e NAME` (value-less form) and git's env-config pick them up.
+#
+# The file is `source`d, i.e. executed as shell — so it MUST be trusted. We
+# refuse to source anything group/other-accessible (a writable file would be
+# arbitrary code execution) to keep the trust boundary honest.
+load_secrets() {
+  [[ -z "$SECRET_PATH" ]] && return 0
+  if [[ ! -f "$SECRET_PATH" ]]; then
+    echo "Error: --secret-path not found: $SECRET_PATH" >&2
+    exit 2
+  fi
+  local mode=""
+  if ! mode="$(stat -c '%a' "$SECRET_PATH" 2>/dev/null)"; then
+    mode="$(stat -f '%Lp' "$SECRET_PATH" 2>/dev/null || echo "")"
+  fi
+  # Reject if group/other bits are set (last two octal digits must be "00").
+  if [[ -n "$mode" && "${mode: -2}" != "00" ]]; then
+    echo "Error: secret file $SECRET_PATH must be chmod 600/400 (not group/other-accessible). Current: $mode" >&2
+    exit 2
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  . "$SECRET_PATH"
+  set +a
+}
+
+# Auto-generate the vault password file next to this script (VAULT_PASS_FILE),
+# ONLY when a vault password is available (sourced from --secret-path). It holds
+# the raw ANSIBLE_VAULT_PASSWORD, chmod 600 and NOT executable, so ansible reads
+# it directly. It is mounted read-only into the container and pointed at by
+# ANSIBLE_VAULT_PASSWORD_FILE — so both normal and debug containers decrypt with
+# no extra flags. Rewritten every run so it can never drift; gitignored.
+ensure_vault_client() {
+  [[ -z "${ANSIBLE_VAULT_PASSWORD:-}" ]] && return 0
+  ( umask 077; printf '%s' "$ANSIBLE_VAULT_PASSWORD" > "$VAULT_PASS_FILE" )
+  chmod 600 "$VAULT_PASS_FILE"
+  echo ">> Vault password file generated: $VAULT_PASS_FILE (mounted at $VAULT_PASS_CONTAINER)"
+}
+
+# Resolve the clone token (optional). Source: INVENTORY_TOKEN env (populated by
+# load_secrets, or set by the caller) > none (anonymous). Sets CLONE_TOKEN and
+# AUTH_SOURCE (env|anonymous). The token VALUE is never echoed; only its source.
 resolve_token() {
   CLONE_TOKEN=""
   AUTH_SOURCE="anonymous"
-  if [[ -n "$TOKEN_FILE" ]]; then
-    # Strip a single trailing newline; keep the rest verbatim.
-    CLONE_TOKEN="$(cat "$TOKEN_FILE")"
-    AUTH_SOURCE="file"
-  elif [[ -n "${INVENTORY_TOKEN:-}" ]]; then
+  if [[ -n "${INVENTORY_TOKEN:-}" ]]; then
     CLONE_TOKEN="$INVENTORY_TOKEN"
     AUTH_SOURCE="env"
   fi
@@ -238,22 +312,25 @@ resolve_token() {
 # Human-readable auth label for the summary (never the token value).
 auth_label() {
   case "$AUTH_SOURCE" in
-    file) echo "token (file)" ;;
     env)  echo "token (env)" ;;
     *)    echo "anonymous" ;;
   esac
 }
 
 # ── Fresh inventory clone (deleted on exit, always latest) ───────────────────
-# cleanup removes the clone dir AND the askpass helper (if one was created).
+# cleanup removes the clone dir. `|| true` guards the rm so a non-zero status
+# from it can't clobber the script's real exit code (the EXIT trap runs last).
 cleanup() {
-  rm -rf "$CLONE_DIR"
-  # Guard with `|| true`: a false [[ -n ... ]] would otherwise become the trap's
-  # exit status and clobber the script's real exit code (the EXIT trap runs last).
-  [[ -n "${ASKPASS_HELPER:-}" ]] && rm -f "$ASKPASS_HELPER" || true
+  rm -rf "$CLONE_DIR" || true
 }
 
 clone_inventory() {
+  # Debug mode may start an idle container with no inventory at all (nothing to
+  # clone or mount). Signal that with an empty CLONE_DIR and skip the clone.
+  if [[ -z "$INVENTORY" ]]; then
+    CLONE_DIR=""
+    return 0
+  fi
   # DooD: the clone dir is bind-mounted into the ansible container, and -v
   # resolves on the HOST daemon. So clone beside this script (host-consistent),
   # NOT control_node's private /tmp. Override with CLONE_PARENT if needed.
@@ -267,22 +344,28 @@ clone_inventory() {
   echo ">> Auth: $AUTH_SOURCE"
 
   if [[ -n "$CLONE_TOKEN" ]]; then
-    # Authenticate WITHOUT leaking the token: a GIT_ASKPASS helper supplies it on
-    # demand. The token reaches git only via the helper's stdout — never in argv
-    # (ps), the URL, git config, or any log. The helper reads the token from its
-    # own env (exported solely for this git call), so the token is not baked into
-    # the helper file's contents either. The URL carries only the "oauth2"
-    # username; for a GitLab PAT the username is ignored and the token (as
-    # password) is what authenticates.
-    ASKPASS_HELPER="$(mktemp "$CLONE_PARENT/askpass.XXXXXX")"
-    chmod 600 "$ASKPASS_HELPER"
-    printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "$INVENTORY_GIT_TOKEN"' \
-      > "$ASKPASS_HELPER"
-    chmod 700 "$ASKPASS_HELPER"
-    local auth_url="${INVENTORY_REPO/https:\/\//https://oauth2@}"
-    GIT_ASKPASS="$ASKPASS_HELPER" GIT_TERMINAL_PROMPT=0 \
-      INVENTORY_GIT_TOKEN="$CLONE_TOKEN" \
-      git clone --depth 1 --branch "$INVENTORY_REF" "$auth_url" "$CLONE_DIR"
+    # Authenticate WITHOUT leaking the token and WITHOUT an askpass helper: the
+    # credential rides in as an HTTP Authorization header injected via git's
+    # env-based config (GIT_CONFIG_* — git >= 2.31). The token therefore lives
+    # only in this git process's ENVIRONMENT (base64-encoded), never in:
+    #   * argv        → invisible to `ps`
+    #   * the URL      → the clone uses the bare repo URL, so no credential is
+    #                    written to the clone's .git/config (which is later
+    #                    bind-mounted read-only into the ansible container)
+    #   * any log/summary output
+    # Basic auth is "<username>:<token>". The username matters by token type:
+    #   * GitLab PAT          → username is ignored (convention: oauth2)
+    #   * GitLab deploy token → authenticates as the token's OWN username
+    # So the username is configurable via INVENTORY_TOKEN_USER (set it in the
+    # secret file next to INVENTORY_TOKEN); it defaults to oauth2 for PATs.
+    local auth_user="${INVENTORY_TOKEN_USER:-oauth2}"
+    local auth_b64
+    auth_b64="$(printf '%s:%s' "$auth_user" "$CLONE_TOKEN" | base64 | tr -d '\n')"
+    GIT_CONFIG_COUNT=1 \
+      GIT_CONFIG_KEY_0="http.extraHeader" \
+      GIT_CONFIG_VALUE_0="Authorization: Basic $auth_b64" \
+      GIT_ASKPASS="" SSH_ASKPASS="" GIT_TERMINAL_PROMPT=0 \
+      git clone --depth 1 --branch "$INVENTORY_REF" "$INVENTORY_REPO" "$CLONE_DIR"
   else
     # Anonymous clone. Neutralize any inherited GIT_ASKPASS/SSH_ASKPASS from the
     # caller's environment (e.g. an editor or CI) and disable interactive prompts
@@ -305,12 +388,60 @@ clone_inventory() {
 }
 
 # ── Build the ansible command (discrete args, no eval) ───────────────────────
+# Produces three things:
+#   ANSIBLE_ARGS     — the human-readable ansible-playbook invocation (summary).
+#   CMD_ARGS         — what the container actually runs. Identical to ANSIBLE_ARGS
+#                      unless a vault password is present, in which case it is
+#                      wrapped so the password is echoed to ansible via a pipe.
+#   SECRET_ENV_ARGS  — `docker run` env flags for secrets (value-less `-e NAME`,
+#                      so the value is copied from this script's env, never argv).
+#   VAULT_MOUNT_ARGS — `docker run -v` flags mounting the auto-generated vault
+#                      client into the container (empty when no vault password).
 build_cmd_args() {
-  CMD_ARGS=(ansible-playbook -i "/inventory/$INVENTORY" "/playbooks/$PLAYBOOK")
-  [[ -n "$TAGS"       ]] && CMD_ARGS+=(--tags "$TAGS")
-  [[ -n "$LIMIT"      ]] && CMD_ARGS+=(--limit "$LIMIT")
-  [[ -n "$EXTRA_VARS" ]] && CMD_ARGS+=(--extra-vars "$EXTRA_VARS")
+  # Debug mode may run with no playbook/inventory (idle container); there is no
+  # ansible command to build then — only the secret env/mount flags still matter.
+  ANSIBLE_ARGS=()
+  if [[ -n "$PLAYBOOK" && -n "$INVENTORY" ]]; then
+    ANSIBLE_ARGS=(ansible-playbook -i "/inventory/$INVENTORY" "/playbooks/$PLAYBOOK")
+    [[ -n "$TAGS"       ]] && ANSIBLE_ARGS+=(--tags "$TAGS")
+    [[ -n "$LIMIT"      ]] && ANSIBLE_ARGS+=(--limit "$LIMIT")
+    [[ -n "$EXTRA_VARS" ]] && ANSIBLE_ARGS+=(--extra-vars "$EXTRA_VARS")
+  fi
+
+  # Vault: mount the auto-generated password file and point
+  # ANSIBLE_VAULT_PASSWORD_FILE at it. ansible reads the mounted file directly
+  # and decrypts automatically — no per-command flags, and it works identically
+  # for a manual `ansible-playbook` inside a debug container. Only the FILE PATH
+  # (not the password) ever appears in argv.
+  SECRET_ENV_ARGS=()
+  VAULT_MOUNT_ARGS=()
+  if [[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]]; then
+    if [[ ! -f "$VAULT_PASS_FILE" ]]; then
+      echo "Error: vault password file not found at $VAULT_PASS_FILE (should have been auto-generated)." >&2
+      exit 2
+    fi
+    SECRET_ENV_ARGS=(-e "ANSIBLE_VAULT_PASSWORD_FILE=$VAULT_PASS_CONTAINER")
+    VAULT_MOUNT_ARGS=(-v "$VAULT_PASS_FILE":"$VAULT_PASS_CONTAINER":ro)
+  fi
+  CMD_ARGS=(${ANSIBLE_ARGS[@]+"${ANSIBLE_ARGS[@]}"})
   return 0
+}
+
+# ── Single source of truth for `docker run` flags ────────────────────────────
+# Assemble the mounts + env shared by BOTH the normal and debug runs. Only the
+# mode-specific bits differ and stay in the callers: normal uses `--rm` + the
+# ansible command + a `tee` pipe; debug uses `-d --name` + `sleep infinity`.
+# Change a mount or env var HERE and all three call sites (normal, debug,
+# print_docker_run) update together.
+build_docker_base_args() {
+  DOCKER_BASE_ARGS=(--add-host host.docker.internal:host-gateway)
+  # /inventory only when an inventory was cloned (a bare --debug container has none).
+  [[ -n "$CLONE_DIR" ]] && DOCKER_BASE_ARGS+=(-v "$CLONE_DIR":/inventory:ro)
+  DOCKER_BASE_ARGS+=(-v "$SSH_KEY":/root/.ssh/id_key:ro)
+  DOCKER_BASE_ARGS+=(${VAULT_MOUNT_ARGS[@]+"${VAULT_MOUNT_ARGS[@]}"})
+  DOCKER_BASE_ARGS+=(-e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key
+                     -e ANSIBLE_COLLECTIONS_PATH=/collections)
+  DOCKER_BASE_ARGS+=(${SECRET_ENV_ARGS[@]+"${SECRET_ENV_ARGS[@]}"})
 }
 
 # ── Logging: human-readable run summary + the exact docker command ───────────
@@ -318,32 +449,24 @@ print_summary() {
   cat <<EOF
 ══════════════════ RUN SUMMARY ══════════════════
   Script version : $SCRIPT_VERSION
-  Inventory repo : $INVENTORY_REPO
+  Inventory repo : $([[ -n "$INVENTORY" ]] && echo "$INVENTORY_REPO" || echo "(none — debug)")
   Inventory ref  : $INVENTORY_REF
   Auth           : $(auth_label)
-  Clone dir      : $CLONE_DIR
-  Inventory file : /inventory/$INVENTORY
-  Playbook       : /playbooks/$PLAYBOOK
+  Clone dir      : $([[ -n "$CLONE_DIR" ]] && echo "$CLONE_DIR" || echo "(none)")
+  Inventory file : $([[ -n "$INVENTORY" ]] && echo "/inventory/$INVENTORY" || echo "(none)")
+  Playbook       : $([[ -n "$PLAYBOOK" ]] && echo "/playbooks/$PLAYBOOK" || echo "(none)")
   Image          : $IMAGE
   SSH key        : $SSH_KEY
-  Ansible cmd    : ${CMD_ARGS[*]}
+  Ansible cmd    : $([[ ${#ANSIBLE_ARGS[@]} -gt 0 ]] && echo "${ANSIBLE_ARGS[*]}" || echo "(none — idle container)")
+  Vault          : $([[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]] && echo "ANSIBLE_VAULT_PASSWORD_FILE=$VAULT_PASS_CONTAINER (file auto-generated + mounted)" || echo "none")
   Log file       : $LOG_FILE
 ══════════════════════════════════════════════════
 EOF
 }
 
 print_docker_run() {
-  cat <<EOF
->> docker run command:
-   docker run --rm \\
-     --add-host host.docker.internal:host-gateway \\
-     -v $CLONE_DIR:/inventory:ro \\
-     -v $SSH_KEY:/root/.ssh/id_key:ro \\
-     -e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key \\
-     -e ANSIBLE_COLLECTIONS_PATH=/collections \\
-     $IMAGE \\
-     ${CMD_ARGS[*]}
-EOF
+  echo ">> docker run command:"
+  echo "   docker run --rm ${DOCKER_BASE_ARGS[*]} $IMAGE ${CMD_ARGS[*]}"
 }
 
 # ── Dry-run: clone + print everything, but never pull or run docker ──────────
@@ -362,8 +485,11 @@ run_dry_run() {
 run_debug() {
   if [[ -n "$RUN_ID" ]]; then
     DEBUG_CONTAINER="ansible-debug-$RUN_ID"
-  else
+  elif [[ -n "$CLONE_DIR" ]]; then
     DEBUG_CONTAINER="ansible-debug-$(basename "$CLONE_DIR" | sed 's/^ansible-inventory\.//')"
+  else
+    # No run-id and no inventory clone — name it by PID so it stays unique.
+    DEBUG_CONTAINER="ansible-debug-$$"
   fi
 
   print_summary
@@ -378,21 +504,31 @@ run_debug() {
     docker pull "$IMAGE"
   fi
 
-  # Keep the clone dir alive for the running container.
+  # Keep the clone dir (if any) alive for the running container.
   trap - EXIT
 
+  # Same mounts/env as a normal run (DOCKER_BASE_ARGS); debug just swaps --rm +
+  # ansible command for -d/--name + `sleep infinity`.
   docker run -d --name "$DEBUG_CONTAINER" \
-    --add-host host.docker.internal:host-gateway \
-    -v "$CLONE_DIR":/inventory:ro \
-    -v "$SSH_KEY":/root/.ssh/id_key:ro \
-    -e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key \
-    -e ANSIBLE_COLLECTIONS_PATH=/collections \
+    "${DOCKER_BASE_ARGS[@]}" \
     "$IMAGE" \
     sleep infinity
 
-  local manual="ansible-playbook -i /inventory/$INVENTORY /playbooks/$PLAYBOOK"
-  [[ -n "$TAGS"  ]] && manual="$manual --tags $TAGS"
-  [[ -n "$LIMIT" ]] && manual="$manual --limit $LIMIT"
+  local manual
+  if [[ -n "$INVENTORY" && -n "$PLAYBOOK" ]]; then
+    manual="ansible-playbook -i /inventory/$INVENTORY /playbooks/$PLAYBOOK"
+    [[ -n "$TAGS"  ]] && manual="$manual --tags $TAGS"
+    [[ -n "$LIMIT" ]] && manual="$manual --limit $LIMIT"
+    # No vault flag needed: ANSIBLE_VAULT_PASSWORD_FILE is already set in the
+    # container env and the client is mounted, so ansible decrypts automatically.
+  else
+    manual="# no inventory mounted; test connectivity ad-hoc, e.g.:
+  ansible all -i <your-inventory> -m ping"
+  fi
+
+  local cleanup_hint="  docker rm -f $DEBUG_CONTAINER"
+  [[ -n "$CLONE_DIR" ]] && cleanup_hint="$cleanup_hint
+  rm -rf $CLONE_DIR"
 
   cat <<EOF
 ══════════════ DEBUG MODE ══════════════
@@ -405,8 +541,7 @@ Run the playbook manually inside:
   $manual
 
 When done, clean up:
-  docker rm -f $DEBUG_CONTAINER
-  rm -rf $CLONE_DIR
+$cleanup_hint
 ══════════════════════════════════════════
 EOF
   exit 0
@@ -436,14 +571,7 @@ run_normal() {
   # set -e would abort before we record a non-zero exit, so capture via
   # ${PIPESTATUS[0]} (the docker side of the pipe, NOT tee's) and re-exit it.
   set +e
-  docker run --rm \
-    --add-host host.docker.internal:host-gateway \
-    -v "$CLONE_DIR":/inventory:ro \
-    -v "$SSH_KEY":/root/.ssh/id_key:ro \
-    -e ANSIBLE_PRIVATE_KEY_FILE=/root/.ssh/id_key \
-    -e ANSIBLE_COLLECTIONS_PATH=/collections \
-    "$IMAGE" \
-    "${CMD_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
+  docker run --rm "${DOCKER_BASE_ARGS[@]}" "$IMAGE" "${CMD_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
   RUN_EXIT="${PIPESTATUS[0]}"
   set -e
 
@@ -459,11 +587,14 @@ run_normal() {
 
 main() {
   parse_args "$@"
+  load_secrets
+  ensure_vault_client
   resolve_inventory_repo
   resolve_token
   resolve_log_file
   clone_inventory
   build_cmd_args
+  build_docker_base_args
   case "$MODE" in
     debug)   run_debug ;;
     dry-run) run_dry_run ;;

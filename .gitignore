@@ -31,3 +31,6 @@ data/ssh_keys/
 
 # ── Test-generated SSH key (created on the fly by tests/conftest.py) ────────
 tests/fixtures/SSH-default.json
+
+# ── Auto-generated vault-password client (run-ansible.sh; no secret inside) ──
+ansible/.ansible_vault
