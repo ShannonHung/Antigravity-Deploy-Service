@@ -24,7 +24,7 @@ help:
 	@echo "  make start        啟動伺服器（使用 .env，不帶 APP_ENV）"
 	@echo "  make dev          啟動開發伺服器（使用 .env + .env.dev，熱重載）"
 	@echo "  make prod         啟動生產伺服器（使用 .env + .env.prod）"
-	@echo "  make inventory-api 啟動本機假 Inventory API（port 9001）"
+	@echo "  make inventory-api 啟動本機假 Inventory API（HTTPS，port 9001）"
 	@echo "  make certs         產生 fake-api HTTPS 憑證（Root CA + server cert）"
 	@echo ""
 	@echo "  make test         執行測試（不含 e2e；日常開發、CI 用這個）"
@@ -77,7 +77,9 @@ prod:
 # inventory-api: 啟動本機假 Inventory API (port 9001)
 .PHONY: inventory-api
 inventory-api:
-	APP_ENV=dev $(UV) run uvicorn fake-api.main:app --reload --port 9001
+	APP_ENV=dev $(UV) run uvicorn fake-api.main:app --reload --port 9001 \
+		--ssl-keyfile fake-api/certs/server.key \
+		--ssl-certfile fake-api/certs/server.crt
 
 # certs: 產生本機 fake-api HTTPS 用的兩層 PKI（Root CA + server 憑證）
 .PHONY: certs
