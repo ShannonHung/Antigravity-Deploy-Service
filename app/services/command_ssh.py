@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import logging
+import shlex
+from typing import Optional
 
 import asyncssh
 
@@ -75,3 +77,36 @@ class SshSupport:
                 f"SSH connect to control_node failed for {state.command_id}: {exc}",
                 detail={"command_id": state.command_id},
             ) from exc
+
+    async def _read_log_tail(self, state: CommandState, n: int) -> Optional[str]:
+        """Read the last ``n`` lines of a run's control_node log over SSH.
+
+        Used to backfill the API ``output`` for a failed ``logged`` command,
+        whose SSH channel carries no output (the run redirects stdout/stderr to
+        ``/dev/null`` on the target so it survives the pod dying — the real
+        output lives only in ``run_log_path`` on the control_node).
+
+        Returns the tail text, or ``None`` when there is no log path, the file
+        is absent/empty, or SSH fails. SSH failures are swallowed on purpose: a
+        transient control_node outage must never turn a poll into a 5xx — the
+        caller keeps its last-known ``output``.
+        """
+        if not state.run_log_path:
+            return None
+        try:
+            conn = await self._connect_to_control_node(state)
+        except BaseAppException as exc:
+            logger.info(
+                f"Log-tail read failed to connect for {state.command_id}: {exc}",
+                extra={"command_id": state.command_id},
+            )
+            return None
+        try:
+            quoted = shlex.quote(state.run_log_path)
+            res = await conn.run(f"tail -n {int(n)} {quoted}", check=False)
+            if res.exit_status != 0:
+                return None  # file absent / unreadable
+            text = str(res.stdout) if res.stdout else ""
+            return text or None
+        finally:
+            conn.close()
