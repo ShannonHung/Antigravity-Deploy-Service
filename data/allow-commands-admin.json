@@ -6,7 +6,7 @@
       "description": "reboot",
       "disconnects_ssh": true,
       "killable": false,
-      "pipeline": [{"command": ["reboot"]}],
+      "pipeline": [{ "command": ["reboot"] }],
       "arguments": []
     },
     {
@@ -14,8 +14,10 @@
       "description": "sleep",
       "disconnects_ssh": false,
       "killable": true,
-      "pipeline": [{"command": ["sleep", "{time}"]}],
-      "arguments": [{"name": "time", "type": "int", "validation_regex": "^[0-9]+$"}]
+      "pipeline": [{ "command": ["sleep", "{time}"] }],
+      "arguments": [
+        { "name": "time", "type": "int", "validation_regex": "^[0-9]+$" }
+      ]
     },
     {
       "command_name": "list_file",
@@ -23,10 +25,16 @@
       "disconnects_ssh": false,
       "killable": true,
       "pipeline": [
-        {"command": ["ls", "-al"]},
-        {"command": ["grep", "{key_word}"]}
+        { "command": ["ls", "-al"] },
+        { "command": ["grep", "{key_word}"] }
       ],
-      "arguments": [{"name": "key_word", "type": "string", "validation_regex": "^[a-zA-Z0-9._-]+$"}]
+      "arguments": [
+        {
+          "name": "key_word",
+          "type": "string",
+          "validation_regex": "^[a-zA-Z0-9._-]+$"
+        }
+      ]
     },
     {
       "command_name": "whoami",
@@ -35,12 +43,111 @@
       "killable": true,
       "pipeline": [
         {
-          "command": [
-            "whoami"
-          ]
+          "command": ["whoami"]
         }
       ],
       "arguments": []
+    },
+    {
+      "command_name": "run_ansible",
+      "description": "On the control_node, run run-ansible.sh with a chosen playbook against an inventory. The playbook is restricted by regex to those baked into the runner image. Optionally limit to a host/group pattern via ansible --limit. Use ssh_config=control_node, host/port pointing at the control_node.",
+      "disconnects_ssh": false,
+      "killable": true,
+      "logged": true,
+      "checks_script_version": false,
+      "min_script_version": "2.0.0",
+      "pipeline": [
+        {
+          "command": [
+            "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/ansible/run-ansible.sh",
+            "--playbook",
+            "{playbook}",
+            "--inventory",
+            "{inventory}",
+            "--limit",
+            "{limit}",
+            "--no-pull",
+            "--ssh-key",
+            "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/data/ssh_keys/client_key",
+            "--log-dir",
+            "/var/log/deploy-service",
+            "--run-id",
+            "{run_id}"
+          ]
+        }
+      ],
+      "arguments": [
+        {
+          "name": "playbook",
+          "type": "string",
+          "description": "Playbook to run. Restricted to playbooks baked into the runner image.",
+          "validation_regex": "^(ping|fail|clock)\\.yml$"
+        },
+        {
+          "name": "inventory",
+          "type": "string",
+          "description": "Inventory path relative to the inventory repo root, e.g. taipei/multinode.ini",
+          "validation_regex": "^[a-zA-Z0-9._/-]+\\.(ini|ya?ml)$"
+        },
+        {
+          "name": "limit",
+          "type": "string",
+          "required": false,
+          "description": "Optional ansible --limit pattern, e.g. node1 or node1,node2. Omit to target all hosts.",
+          "validation_regex": "^[a-zA-Z0-9._,-]+$"
+        }
+      ]
+    },
+    {
+      "command_name": "run_ansible_clock",
+      "description": "Runs clock.yml, which prints the current time every clock_interval seconds for clock_count ticks. Use this to watch the live log viewer stream output. Total run ~= clock_count * clock_interval seconds.",
+      "disconnects_ssh": false,
+      "killable": false,
+      "logged": true,
+      "pipeline": [
+        {
+          "command": [
+            "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/ansible/run-ansible.sh",
+            "--playbook",
+            "clock.yml",
+            "--inventory",
+            "{inventory}",
+            "--extra-vars",
+            "clock_count={clock_count}",
+            "--extra-vars",
+            "clock_interval={clock_interval}",
+            "--no-pull",
+            "--ssh-key",
+            "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/data/ssh_keys/client_key",
+            "--log-dir",
+            "/var/log/deploy-service",
+            "--run-id",
+            "{run_id}"
+          ]
+        }
+      ],
+      "arguments": [
+        {
+          "name": "inventory",
+          "type": "string",
+          "description": "Inventory path relative to the inventory repo root, e.g. taipei/multinode.ini",
+          "validation_regex": "^[a-zA-Z0-9._/-]+\\.(ini|ya?ml)$"
+        },
+        {
+          "name": "clock_count",
+          "type": "int",
+          "required": false,
+          "description": "Optional: how many timestamps to print (e.g. 30). Omit to use the playbook default.",
+          "validation_regex": "^[0-9]{1,4}$"
+        },
+        {
+          "name": "clock_interval",
+          "type": "int",
+          "required": false,
+          "description": "Optional: seconds to wait between prints (e.g. 2). Omit to use the playbook default.",
+          "validation_regex": "^[0-9]{1,3}$"
+        }
+      ]
     }
   ]
 }
