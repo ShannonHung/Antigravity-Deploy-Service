@@ -69,7 +69,10 @@ Options:
                           INVENTORY_TOKEN_USER (Basic-auth username; default
                           oauth2 for a PAT, set to the deploy token's username
                           for a GitLab deploy token) and ANSIBLE_VAULT_PASSWORD
-                          (ansible-vault decrypt). The file must be chmod 600/400
+                          (ansible-vault decrypt). INVENTORY_TOKEN and
+                          ANSIBLE_VAULT_PASSWORD are stored base64-encoded and
+                          decoded at load time (INVENTORY_TOKEN_USER is not).
+                          The file must be chmod 600/400
                           (not group/other-accessible).
                           Secret VALUES are never accepted as CLI args, never
                           logged, and never placed in argv/URL. Also honoured from
@@ -107,9 +110,10 @@ Example:
   ./run-ansible.sh -d --playbook ping.yml --inventory taipei/multinode.ini --limit node1
   ./run-ansible.sh --secret-path ~/.secrets.env --inventory-repo-name ansible-inventory-v2 \
       --playbook ping.yml --inventory taipei/multinode.ini
-  # ~/.secrets.env (chmod 600):
-  #   INVENTORY_TOKEN=glpat-xxx
-  #   ANSIBLE_VAULT_PASSWORD=s3cr3t
+  # ~/.secrets.env (chmod 600; INVENTORY_TOKEN and ANSIBLE_VAULT_PASSWORD
+  # are stored base64-encoded and decoded at load time):
+  #   INVENTORY_TOKEN=$(printf %s glpat-xxx | base64)
+  #   ANSIBLE_VAULT_PASSWORD=$(printf %s s3cr3t | base64)
 EOF
 }
 
@@ -282,6 +286,31 @@ load_secrets() {
   # shellcheck disable=SC1090
   . "$SECRET_PATH"
   set +a
+
+  # The secret file stores INVENTORY_TOKEN and ANSIBLE_VAULT_PASSWORD base64-
+  # encoded; decode them here, ONCE, so every downstream consumer (resolve_token
+  # for the clone, ensure_vault_client for the vault file) sees plaintext and
+  # nothing has to decode again. Only decode keys that are actually present —
+  # both are optional (anonymous clone / no-vault runs supply neither). A value
+  # that isn't valid base64 fails the run: better to stop than to clone with a
+  # mangled token or decrypt with a mangled password. The value itself is never
+  # printed. `set -a` above already marked these for export, so re-assigning
+  # them keeps them exported.
+  local decoded
+  if [[ -n "${INVENTORY_TOKEN:-}" ]]; then
+    if ! decoded="$(printf '%s' "$INVENTORY_TOKEN" | base64 -d 2>/dev/null)"; then
+      echo "Error: INVENTORY_TOKEN in $SECRET_PATH is not valid base64." >&2
+      exit 2
+    fi
+    INVENTORY_TOKEN="$decoded"
+  fi
+  if [[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]]; then
+    if ! decoded="$(printf '%s' "$ANSIBLE_VAULT_PASSWORD" | base64 -d 2>/dev/null)"; then
+      echo "Error: ANSIBLE_VAULT_PASSWORD in $SECRET_PATH is not valid base64." >&2
+      exit 2
+    fi
+    ANSIBLE_VAULT_PASSWORD="$decoded"
+  fi
 }
 
 # Auto-generate the vault password file next to this script (VAULT_PASS_FILE),
