@@ -11,6 +11,8 @@
         {
           "command": [
             "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/ansible/run-ansible.sh",
+            "--secret-path",
+            "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/ansible/.secrets.env",
             "--playbook",
             "{playbook}",
             "--inventory",
@@ -59,6 +61,8 @@
         {
           "command": [
             "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/ansible/run-ansible.sh",
+            "--secret-path",
+            "/Users/shannon/Documents/Code/antigravity-fastapi/deploy-service/ansible/.secrets.env",
             "--playbook",
             "clock.yml",
             "--inventory",

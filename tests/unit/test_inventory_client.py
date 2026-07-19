@@ -132,3 +132,42 @@ async def test_list_mappings_timeout_raises_upstream_timeout():
         raise httpx.ReadTimeout("slow", request=request)
     with pytest.raises(UpstreamTimeoutException):
         await _client(handler).list_mappings("type1")
+
+
+# ── _build_inventory_client verify selection ─────────────────────────────────
+
+from app.core.config import get_settings
+from app.core.dependencies import _build_inventory_client
+
+
+def test_build_inventory_client_uses_ca_path_when_set(monkeypatch):
+    monkeypatch.setenv("INVENTORY_CA", "data/ca.crt")
+    monkeypatch.setenv("INVENTORY_API_VERIFY_SSL", "false")
+    get_settings.cache_clear()
+    try:
+        client = _build_inventory_client()
+        assert client._verify_ssl == "data/ca.crt"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_build_inventory_client_falls_back_to_verify_true(monkeypatch):
+    monkeypatch.setenv("INVENTORY_CA", "")
+    monkeypatch.setenv("INVENTORY_API_VERIFY_SSL", "true")
+    get_settings.cache_clear()
+    try:
+        client = _build_inventory_client()
+        assert client._verify_ssl is True
+    finally:
+        get_settings.cache_clear()
+
+
+def test_build_inventory_client_falls_back_to_verify_false(monkeypatch):
+    monkeypatch.setenv("INVENTORY_CA", "")
+    monkeypatch.setenv("INVENTORY_API_VERIFY_SSL", "false")
+    get_settings.cache_clear()
+    try:
+        client = _build_inventory_client()
+        assert client._verify_ssl is False
+    finally:
+        get_settings.cache_clear()

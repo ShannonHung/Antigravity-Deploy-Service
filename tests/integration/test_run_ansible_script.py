@@ -1,3 +1,4 @@
+import base64
 import os
 import subprocess
 import time
@@ -131,6 +132,49 @@ def test_no_sidecar_without_run_id(tmp_path):
     assert not list(tmp_path.glob("*.exit"))
 
 
+def _run_with_failing_git(tmp_path, *extra):
+    """Fake git that FAILS the clone (like a private repo with no token),
+    printing a git-style error to stderr and exiting non-zero. Fake docker
+    exists but must never be reached."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "fatal: could not read Username for '
+        "'https://gitlab.com': terminal prompts disabled\" >&2\n"
+        "exit 128\n"
+    )
+    (bindir / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f'touch "{tmp_path}/docker_was_called"\n'
+        "exit 0\n"
+    )
+    for f in ("git", "docker"):
+        os.chmod(bindir / f, 0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "SKIP_SSH_KEY_CHECK": "1"}
+    env.pop("INVENTORY_REPO", None)
+    return subprocess.run(
+        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
+         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path), *extra],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_clone_failure_writes_marker_sidecar_and_log(tmp_path):
+    res = _run_with_failing_git(tmp_path, "--run-id", "clone-fail")
+    # The script must EXIT with git's real code so the API sees failure.
+    assert res.returncode == 128, res.stderr
+    # docker must never have been reached.
+    assert not (tmp_path / "docker_was_called").exists()
+    # The clone error is now captured in the per-run log (was going to /dev/null).
+    log = (tmp_path / "clone-fail.log").read_text()
+    assert "could not read Username" in log
+    assert log.rstrip().endswith("=== EXIT 128 ===")
+    # And the sidecar marker is written so heal can recover cross-pod.
+    assert (tmp_path / "clone-fail.exit").read_text().strip() == "128"
+
+
 def test_summary_and_docker_run_logged(tmp_path):
     res = _run_with_fake_docker(tmp_path, 0, "--run-id", "sum1", "--limit", "node1")
     out = res.stdout
@@ -234,6 +278,101 @@ def test_debug_starts_idle_container_and_keeps_clone(tmp_path):
     assert clones, "debug mode must keep the clone dir"
 
 
+def test_debug_without_playbook_inventory_starts_bare_container(tmp_path):
+    # --debug with neither --playbook nor --inventory: no clone, no /inventory
+    # mount, container still starts idle.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    # git must NOT be called (nothing to clone); record if it ever is.
+    (bindir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        f'touch "{tmp_path}/git_was_called"\n'
+    )
+    (bindir / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$@" >> "{tmp_path}/docker_argv"\n'
+        "exit 0\n"
+    )
+    for f in ("git", "docker"):
+        os.chmod(bindir / f, 0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "SKIP_SSH_KEY_CHECK": "1", "CLONE_PARENT": str(tmp_path / "clones")}
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path),
+         "--debug", "--run-id", "bare1"],
+        capture_output=True, text=True, env=env,
+    )
+    assert res.returncode == 0, res.stderr
+    assert not (tmp_path / "git_was_called").exists(), "no inventory → git must not run"
+    argv = (tmp_path / "docker_argv").read_text()
+    assert "run -d" in argv
+    assert "sleep infinity" in argv
+    assert "ansible-debug-bare1" in argv
+    # No inventory mounted.
+    assert "/inventory:ro" not in argv
+    assert "docker exec -it ansible-debug-bare1 bash" in res.stdout
+
+
+def test_debug_requires_both_or_neither(tmp_path):
+    # Only one of the pair in debug mode is a mistake → rejected. Pass just
+    # --inventory (no --playbook) to exercise the guard.
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--inventory", "taipei/multinode.ini",
+         "--no-pull", "--log-dir", str(tmp_path), "--debug"],
+        capture_output=True, text=True,
+        env={**os.environ, "DRYRUN": "1", "SKIP_SSH_KEY_CHECK": "1"},
+    )
+    assert res.returncode == 2
+    assert "together" in (res.stderr + res.stdout).lower()
+
+
+def test_non_debug_still_requires_playbook_inventory(tmp_path):
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path)],
+        capture_output=True, text=True, env={**os.environ, "DRYRUN": "1"},
+    )
+    assert res.returncode == 2
+    assert "required" in (res.stderr + res.stdout).lower()
+
+
+def test_debug_container_has_vault_env_preset(tmp_path):
+    """Even a bare `-d` container (no playbook/inventory) gets the vault password
+    file mounted and ANSIBLE_VAULT_PASSWORD_FILE preset, so manual runs decrypt."""
+    vault = "debug-vault-pw"
+    vault_b64 = base64.b64encode(vault.encode()).decode()
+    sec = tmp_path / "secrets.env"
+    # Secret values are stored base64-encoded; load_secrets decodes them.
+    sec.write_text(f"ANSIBLE_VAULT_PASSWORD={vault_b64}\n")
+    os.chmod(sec, 0o600)
+    vault_file = tmp_path / ".ansible_vault"
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "git").write_text("#!/usr/bin/env bash\nexit 0\n")
+    (bindir / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$*" >> "{tmp_path}/docker_argv"\n'
+        "exit 0\n"
+    )
+    for f in ("git", "docker"):
+        os.chmod(bindir / f, 0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "SKIP_SSH_KEY_CHECK": "1", "VAULT_PASS_FILE": str(vault_file),
+           "CLONE_PARENT": str(tmp_path / "clones")}
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path),
+         "--debug", "--run-id", "dbgvault", "--secret-path", str(sec)],
+        capture_output=True, text=True, env=env,
+    )
+    assert res.returncode == 0, res.stderr
+    assert vault_file.exists() and vault_file.read_text() == vault
+    argv = (tmp_path / "docker_argv").read_text()
+    assert "run -d" in argv and "sleep infinity" in argv
+    assert f"-v {vault_file}:/ansible_vault:ro" in argv
+    assert "-e ANSIBLE_VAULT_PASSWORD_FILE=/ansible_vault" in argv
+    assert vault not in argv and vault not in res.stdout
+
+
 def test_debug_and_dry_run_mutually_exclusive(tmp_path):
     res = _run(tmp_path, "--debug", "--dry-run")
     assert res.returncode == 2
@@ -294,15 +433,16 @@ def test_debug_fails_fast_on_missing_ssh_key(tmp_path):
 # ── Inventory repo selection + token auth ────────────────────────────────────
 #
 # These use a fake git that records what URL it was asked to clone, the FULL
-# argv it received, and whether GIT_ASKPASS was set in its environment — written
-# to files in tmp_path. That lets us assert the resolved URL, prove the token
-# never appears in argv/URL, and check the askpass wiring. The fake docker exits
-# 0 so the run completes; we only care about the clone step here.
+# argv it received, whether GIT_ASKPASS was set, and the auth header injected via
+# git's env-based config (GIT_CONFIG_VALUE_0) — written to files in tmp_path.
+# That lets us assert the resolved URL, prove the token never appears in
+# argv/URL/output, and confirm it rides in only via the env-config header. The
+# fake docker exits 0 so the run completes; we only care about the clone step.
 
 def _run_with_recording_git(tmp_path, *extra, env_extra=None):
-    """Fake git that records clone URL + argv + GIT_ASKPASS presence (and, if an
-    askpass helper is wired, the value it produces) to files, then creates the
-    inventory file so the script proceeds. Fake docker exits 0."""
+    """Fake git that records clone URL + argv + GIT_ASKPASS + the injected
+    GIT_CONFIG auth header to files, then creates the inventory file so the
+    script proceeds. Fake docker exits 0."""
     bindir = tmp_path / "bin"
     bindir.mkdir()
     (bindir / "git").write_text(
@@ -314,11 +454,10 @@ def _run_with_recording_git(tmp_path, *extra, env_extra=None):
         'url="${@: -2:1}"\n'
         f'printf "%s\\n" "$url" >> "{tmp_path}/git_url"\n'
         f'printf "ASKPASS=[%s]\\n" "${{GIT_ASKPASS:-}}" >> "{tmp_path}/git_askpass"\n'
-        # If an askpass helper is wired, run it and record what it yields, so a
-        # test can confirm the token reaches git ONLY via the helper.
-        'if [[ -n "${GIT_ASKPASS:-}" && -x "${GIT_ASKPASS:-}" ]]; then\n'
-        f'  printf "HELPER=[%s]\\n" "$("${{GIT_ASKPASS}}" "Password:")" >> "{tmp_path}/git_helper"\n'
-        'fi\n'
+        # Record the credential header the script injects via env-based config
+        # (GIT_CONFIG_VALUE_0). The value is base64; the Python test decodes it
+        # to prove the token reaches git ONLY here, never in argv/URL.
+        f'printf "HEADER=[%s]\\n" "${{GIT_CONFIG_VALUE_0:-}}" >> "{tmp_path}/git_header"\n'
         'mkdir -p "$dest/taipei"\n'
         'printf "[all]\\nnode1\\n" > "$dest/taipei/multinode.ini"\n'
     )
@@ -330,6 +469,10 @@ def _run_with_recording_git(tmp_path, *extra, env_extra=None):
     # The recording git ignores --branch, so unset INVENTORY_REPO to exercise the
     # repo-name → URL builder (otherwise the inherited env could override it).
     env.pop("INVENTORY_REPO", None)
+    # A stray INVENTORY_TOKEN / INVENTORY_TOKEN_USER in the ambient env would
+    # contaminate auth; drop them so each test controls auth explicitly.
+    env.pop("INVENTORY_TOKEN", None)
+    env.pop("INVENTORY_TOKEN_USER", None)
     if env_extra:
         env.update(env_extra)
     res = subprocess.run(
@@ -385,49 +528,139 @@ def test_anonymous_clone_when_no_token(tmp_path):
     assert "Auth           : anonymous" in res.stdout
 
 
-def test_token_from_env_uses_askpass_and_does_not_leak(tmp_path):
+def _decode_header_token(tmp_path):
+    """Decode the base64 in the recorded `Authorization: Basic ...` header."""
+    raw = (tmp_path / "git_header").read_text().strip()
+    # Format recorded by the fake git: HEADER=[Authorization: Basic <b64>]
+    inner = raw[len("HEADER=["):-1] if raw.startswith("HEADER=[") else raw
+    assert inner.startswith("Authorization: Basic "), raw
+    b64 = inner[len("Authorization: Basic "):]
+    return base64.b64decode(b64).decode()
+
+
+def test_token_from_env_uses_config_header_and_does_not_leak(tmp_path):
     secret = "glpat-SUPERSECRETTOKEN123"
     res = _run_with_recording_git(tmp_path, env_extra={"INVENTORY_TOKEN": secret})
     assert res.returncode == 0, res.stderr
-    # GIT_ASKPASS must be wired to an executable helper.
+    # No askpass helper is used anymore.
     askpass = (tmp_path / "git_askpass").read_text()
-    assert "ASKPASS=[]" not in askpass
-    # The token reaches git ONLY through the helper's stdout, never in argv/URL.
+    assert "ASKPASS=[]" in askpass
+    # The token never appears in argv, the clone URL, or any printed output.
     argv = (tmp_path / "git_argv").read_text()
     url = (tmp_path / "git_url").read_text()
     assert secret not in argv, "token must never appear in git argv"
     assert secret not in url, "token must never appear in the clone URL"
+    assert "@" not in url, "clone URL must stay credential-free (nothing in .git/config)"
     assert secret not in res.stdout and secret not in res.stderr, \
         "token must never be printed"
-    # The helper does produce the token (that's how git gets it).
-    helper = (tmp_path / "git_helper").read_text()
-    assert f"HELPER=[{secret}]" in helper
-    # URL carries only the username, not the token.
-    assert "oauth2@" in url
-    assert secret not in url
+    # The token reaches git ONLY via the env-injected Basic auth header.
+    assert _decode_header_token(tmp_path) == f"oauth2:{secret}"
     assert "Auth           : token (env)" in res.stdout
 
 
-def test_token_file_takes_precedence_over_env(tmp_path):
-    file_secret = "glpat-FROMFILE456"
-    env_secret = "glpat-FROMENV789"
-    tok = tmp_path / "tok.txt"
-    tok.write_text(file_secret + "\n")  # trailing newline must be stripped
-    res = _run_with_recording_git(
-        tmp_path, "--token-file", str(tok),
-        env_extra={"INVENTORY_TOKEN": env_secret})
+def test_secret_path_token_drives_clone_auth(tmp_path):
+    secret = "glpat-FROMSECRETFILE456"
+    secret_b64 = base64.b64encode(secret.encode()).decode()
+    sec = tmp_path / "secrets.env"
+    # Secret values are stored base64-encoded; load_secrets decodes them.
+    sec.write_text(f"INVENTORY_TOKEN={secret_b64}\n")
+    os.chmod(sec, 0o600)
+    res = _run_with_recording_git(tmp_path, "--secret-path", str(sec))
     assert res.returncode == 0, res.stderr
-    helper = (tmp_path / "git_helper").read_text()
-    assert f"HELPER=[{file_secret}]" in helper        # file wins
-    assert env_secret not in helper                    # env ignored
-    assert file_secret not in res.stdout and env_secret not in res.stdout
-    assert "Auth           : token (file)" in res.stdout
+    # Sourced token authenticates the clone, still without leaking anywhere.
+    assert secret not in (tmp_path / "git_argv").read_text()
+    assert secret not in (tmp_path / "git_url").read_text()
+    assert secret not in res.stdout and secret not in res.stderr
+    assert _decode_header_token(tmp_path) == f"oauth2:{secret}"
+    assert "Auth           : token (env)" in res.stdout
 
 
-def test_token_file_missing_is_an_error(tmp_path):
-    res = _run_with_recording_git(tmp_path, "--token-file", "/nonexistent/tok")
+def test_secret_path_token_user_sets_basic_auth_username(tmp_path):
+    # A GitLab deploy token authenticates as its own username, not oauth2.
+    secret = "gldt-DEPLOYTOKEN789"
+    secret_b64 = base64.b64encode(secret.encode()).decode()
+    sec = tmp_path / "secrets.env"
+    # INVENTORY_TOKEN is base64-encoded (decoded by load_secrets);
+    # INVENTORY_TOKEN_USER stays plaintext (not decoded).
+    sec.write_text(f"INVENTORY_TOKEN_USER=shannon\nINVENTORY_TOKEN={secret_b64}\n")
+    os.chmod(sec, 0o600)
+    res = _run_with_recording_git(tmp_path, "--secret-path", str(sec))
+    assert res.returncode == 0, res.stderr
+    # Basic auth carries "<deploy-token-username>:<token>", not oauth2:<token>.
+    assert _decode_header_token(tmp_path) == f"shannon:{secret}"
+    assert secret not in (tmp_path / "git_argv").read_text()
+    assert secret not in res.stdout and secret not in res.stderr
+
+
+def test_secret_path_rejects_group_readable_file(tmp_path):
+    sec = tmp_path / "secrets.env"
+    sec.write_text("INVENTORY_TOKEN=glpat-whatever\n")
+    os.chmod(sec, 0o644)  # group/other-readable → must be refused
+    res = _run_with_recording_git(tmp_path, "--secret-path", str(sec))
     assert res.returncode == 2
-    assert "token-file" in (res.stderr + res.stdout).lower()
+    combined = (res.stderr + res.stdout).lower()
+    assert "600" in combined or "group" in combined
+
+
+def test_secret_path_missing_is_an_error(tmp_path):
+    res = _run_with_recording_git(tmp_path, "--secret-path", "/nonexistent/secrets.env")
+    assert res.returncode == 2
+    assert "secret-path" in (res.stderr + res.stdout).lower()
+
+
+def test_vault_file_autogenerated_mounted_and_env_preset(tmp_path):
+    """A sourced ANSIBLE_VAULT_PASSWORD triggers an auto-generated vault password
+    file (chmod 600, holds the raw password) that is mounted into the container
+    with ANSIBLE_VAULT_PASSWORD_FILE preset. Only the PATH appears in argv."""
+    vault = "s3cr3t-vault-pw"
+    vault_b64 = base64.b64encode(vault.encode()).decode()
+    sec = tmp_path / "secrets.env"
+    # Secret values are stored base64-encoded; load_secrets decodes them, so the
+    # vault password FILE must end up holding the decoded plaintext.
+    sec.write_text(f"ANSIBLE_VAULT_PASSWORD={vault_b64}\n")
+    os.chmod(sec, 0o600)
+    vault_file = tmp_path / ".ansible_vault"  # override so the repo copy is untouched
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        'dest="${@: -1}"\n'
+        'mkdir -p "$dest/taipei"\n'
+        'printf "[all]\\nnode1\\n" > "$dest/taipei/multinode.ini"\n'
+    )
+    (bindir / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$*" >> "{tmp_path}/docker_argv"\n'
+        "exit 0\n"
+    )
+    for f in ("git", "docker"):
+        os.chmod(bindir / f, 0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "SKIP_SSH_KEY_CHECK": "1", "VAULT_PASS_FILE": str(vault_file)}
+    env.pop("INVENTORY_REPO", None)
+    res = subprocess.run(
+        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
+         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path),
+         "--run-id", "vault1", "--secret-path", str(sec)],
+        capture_output=True, text=True, env=env,
+    )
+    assert res.returncode == 0, res.stderr
+
+    # The file was auto-generated, chmod 600, NOT executable, holds the password.
+    assert vault_file.exists(), "vault password file should be auto-generated"
+    assert not os.access(vault_file, os.X_OK), "vault file must NOT be executable"
+    assert oct(vault_file.stat().st_mode & 0o777) == "0o600"
+    assert vault_file.read_text() == vault  # raw password, no newline
+
+    argv = (tmp_path / "docker_argv").read_text()
+    # Mounted into the container and pointed at by ANSIBLE_VAULT_PASSWORD_FILE.
+    assert f"-v {vault_file}:/ansible_vault:ro" in argv
+    assert "-e ANSIBLE_VAULT_PASSWORD_FILE=/ansible_vault" in argv
+    # Only the path is in argv; the password itself never is.
+    assert vault not in argv, "vault password must never appear in docker argv"
+    assert "/dev/stdin" not in argv
+    assert vault not in res.stdout and vault not in res.stderr
 
 
 def test_version_flag_prints_and_exits_zero(tmp_path):

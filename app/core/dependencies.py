@@ -156,11 +156,13 @@ def _get_inventory_token_manager() -> InventoryTokenManager:
 
 def _build_inventory_client() -> InventoryClient:
     s = get_settings()
+    # INVENTORY_CA (CA file path) wins; otherwise fall back to the bool switch.
+    verify = s.INVENTORY_CA if s.INVENTORY_CA else s.INVENTORY_API_VERIFY_SSL
     return InventoryClient(
         base_url=s.INVENTORY_API_URL,
         token_manager=_get_inventory_token_manager(),
         timeout=s.INVENTORY_API_TIMEOUT_SECONDS,
-        verify_ssl=s.INVENTORY_API_VERIFY_SSL,
+        verify_ssl=verify,
     )
 
 

@@ -2,3 +2,7 @@
 logs/
 # Fresh inventory clones land here (host-consistent path for DooD); ephemeral.
 .run-tmp/
+# Secrets sourced via --secret-path (INVENTORY_TOKEN, ANSIBLE_VAULT_PASSWORD); never commit.
+.secrets.env
+# Auto-generated vault password file (from ANSIBLE_VAULT_PASSWORD); never commit.
+.ansible_vault
