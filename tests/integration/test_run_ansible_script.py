@@ -132,6 +132,49 @@ def test_no_sidecar_without_run_id(tmp_path):
     assert not list(tmp_path.glob("*.exit"))
 
 
+def _run_with_failing_git(tmp_path, *extra):
+    """Fake git that FAILS the clone (like a private repo with no token),
+    printing a git-style error to stderr and exiting non-zero. Fake docker
+    exists but must never be reached."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    (bindir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "fatal: could not read Username for '
+        "'https://gitlab.com': terminal prompts disabled\" >&2\n"
+        "exit 128\n"
+    )
+    (bindir / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f'touch "{tmp_path}/docker_was_called"\n'
+        "exit 0\n"
+    )
+    for f in ("git", "docker"):
+        os.chmod(bindir / f, 0o755)
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "SKIP_SSH_KEY_CHECK": "1"}
+    env.pop("INVENTORY_REPO", None)
+    return subprocess.run(
+        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
+         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path), *extra],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def test_clone_failure_writes_marker_sidecar_and_log(tmp_path):
+    res = _run_with_failing_git(tmp_path, "--run-id", "clone-fail")
+    # The script must EXIT with git's real code so the API sees failure.
+    assert res.returncode == 128, res.stderr
+    # docker must never have been reached.
+    assert not (tmp_path / "docker_was_called").exists()
+    # The clone error is now captured in the per-run log (was going to /dev/null).
+    log = (tmp_path / "clone-fail.log").read_text()
+    assert "could not read Username" in log
+    assert log.rstrip().endswith("=== EXIT 128 ===")
+    # And the sidecar marker is written so heal can recover cross-pod.
+    assert (tmp_path / "clone-fail.exit").read_text().strip() == "128"
+
+
 def test_summary_and_docker_run_logged(tmp_path):
     res = _run_with_fake_docker(tmp_path, 0, "--run-id", "sum1", "--limit", "node1")
     out = res.stdout

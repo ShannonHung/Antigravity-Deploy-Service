@@ -19,7 +19,7 @@ set -euo pipefail
 INVENTORY_NAMESPACE="https://gitlab.com/ShannonHung"
 INVENTORY_REPO_NAME="my-ansible-inventory"   # --inventory-repo-name <name>
 IMAGE="shannonhung/ansible-runner:latest"
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.1.0"
 # Where the auto-generated vault password file is mounted INSIDE the container;
 # ANSIBLE_VAULT_PASSWORD_FILE is pointed here so ansible finds it automatically.
 VAULT_PASS_CONTAINER="/ansible_vault"
@@ -317,11 +317,42 @@ auth_label() {
   esac
 }
 
-# ── Fresh inventory clone (deleted on exit, always latest) ───────────────────
-# cleanup removes the clone dir. `|| true` guards the rm so a non-zero status
-# from it can't clobber the script's real exit code (the EXIT trap runs last).
+# ── EXIT traps: clone cleanup (subshell-local) + terminal marker/sidecar ─────
+# main() runs `run_stages 2>&1 | tee "$LOG_FILE"` — the LEFT side of a pipe runs
+# in a forked subshell. On this bash, a subshell does NOT inherit/fire a trap
+# armed in its parent BEFORE the fork; it only fires a trap it explicitly arms
+# ITSELF. So two separate traps are needed:
+#
+#   * clone_cleanup — removes $CLONE_DIR. Armed inside clone_inventory() (which
+#     runs INSIDE the run_stages subshell, once CLONE_DIR is known), so it fires
+#     when THAT subshell exits and actually has CLONE_DIR in scope. run_debug's
+#     `trap - EXIT` disarms this (same shell) to intentionally keep the clone
+#     dir for manual inspection.
+#   * cleanup — the terminal marker (=== EXIT N === appended to $LOG_FILE) and,
+#     when RUN_ID is set, the <run_id>.exit sidecar. Armed once in main(), right
+#     after resolve_log_file, so it fires in the OUTER shell after the pipe
+#     completes — the single place that should write the marker, regardless of
+#     which stage (clone, secret, inventory, ansible) failed. _MARKER_WRITTEN
+#     guards against this same trap firing more than once in one shell.
+clone_cleanup() {
+  rm -rf "${CLONE_DIR:-}" || true
+}
+
+_MARKER_WRITTEN=0
 cleanup() {
-  rm -rf "$CLONE_DIR" || true
+  local code="$?"
+  # Marker/sidecar are a "normal run" concept only (matches pre-existing
+  # behaviour: only run_normal ever wrote them). debug mode intentionally keeps
+  # the container + clone dir for manual inspection, and dry-run does no real
+  # work — neither should report a terminal exit code via the log/sidecar.
+  if [[ "$_MARKER_WRITTEN" -eq 0 && -n "$LOG_FILE" && "$MODE" == "normal" ]]; then
+    _MARKER_WRITTEN=1
+    echo "=== EXIT $code ===" >> "$LOG_FILE" || true
+    if [[ -n "$RUN_ID" ]]; then
+      local exit_file="$LOG_DIR/$RUN_ID.exit"
+      printf '%s\n' "$code" > "$exit_file.tmp" && mv -f "$exit_file.tmp" "$exit_file"
+    fi
+  fi
 }
 
 clone_inventory() {
@@ -338,7 +369,12 @@ clone_inventory() {
   CLONE_PARENT="${CLONE_PARENT:-$SCRIPT_DIR/.run-tmp}"
   mkdir -p "$CLONE_PARENT"
   CLONE_DIR="$(mktemp -d "$CLONE_PARENT/ansible-inventory.XXXXXX")"
-  trap cleanup EXIT
+  # Arm clone_cleanup HERE (not just in main): clone_inventory runs inside the
+  # run_stages subshell forked by `| tee` in main(), and this subshell does not
+  # fire a trap armed only in its parent — it must arm its own to actually
+  # remove CLONE_DIR when it exits. run_debug's `trap - EXIT` disarms this same
+  # trap (same shell) to intentionally keep the clone dir for inspection.
+  trap clone_cleanup EXIT
 
   echo ">> Cloning inventory (ref: $INVENTORY_REF) from $INVENTORY_REPO into $CLONE_DIR"
   echo ">> Auth: $AUTH_SOURCE"
@@ -570,28 +606,18 @@ run_normal() {
 
   # set -e would abort before we record a non-zero exit, so capture via
   # ${PIPESTATUS[0]} (the docker side of the pipe, NOT tee's) and re-exit it.
+  # Output is captured by the outer tee in main(); do not tee again here.
   set +e
-  docker run --rm "${DOCKER_BASE_ARGS[@]}" "$IMAGE" "${CMD_ARGS[@]}" 2>&1 | tee "$LOG_FILE"
+  docker run --rm "${DOCKER_BASE_ARGS[@]}" "$IMAGE" "${CMD_ARGS[@]}" 2>&1
   RUN_EXIT="${PIPESTATUS[0]}"
   set -e
 
-  echo "=== EXIT $RUN_EXIT ===" >> "$LOG_FILE"
-
-  if [[ -n "$RUN_ID" ]]; then
-    EXIT_FILE="$LOG_DIR/$RUN_ID.exit"
-    printf '%s\n' "$RUN_EXIT" > "$EXIT_FILE.tmp" && mv -f "$EXIT_FILE.tmp" "$EXIT_FILE"
-  fi
-
+  # The EXIT-marker log line and <run_id>.exit sidecar are now written by the
+  # cleanup EXIT trap using this exit code.
   exit "$RUN_EXIT"
 }
 
-main() {
-  parse_args "$@"
-  load_secrets
-  ensure_vault_client
-  resolve_inventory_repo
-  resolve_token
-  resolve_log_file
+run_stages() {
   clone_inventory
   build_cmd_args
   build_docker_base_args
@@ -600,6 +626,21 @@ main() {
     dry-run) run_dry_run ;;
     *)       run_normal ;;
   esac
+}
+
+main() {
+  parse_args "$@"
+  load_secrets
+  ensure_vault_client
+  resolve_inventory_repo
+  resolve_token
+  resolve_log_file      # sets LOG_FILE + mkdir LOG_DIR; only now can we tee
+  # DRYRUN exits inside resolve_log_file before reaching here.
+  trap cleanup EXIT     # outer-shell EXIT trap: writes the terminal marker/sidecar
+  # Tee the entire run (clone/secret/inventory/ansible) to the per-run log, and
+  # re-exit run_stages' real code (PIPESTATUS[0], NOT tee's).
+  run_stages 2>&1 | tee "$LOG_FILE"
+  exit "${PIPESTATUS[0]}"
 }
 
 main "$@"
