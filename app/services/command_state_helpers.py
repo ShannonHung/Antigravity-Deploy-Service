@@ -97,8 +97,14 @@ class StateHelpers:
             return state  # no marker yet — genuinely still running
 
         success = code == 0
-        # Reuse the existing output policy: on failure, surface a short tail of
-        # the log; on success, nothing (the full log lives in /view).
+        # On failure, backfill the API output from the control_node log tail so a
+        # cross-pod recovered failure shows its real error (mirrors the fast
+        # path). None (SSH failure / no log) leaves output unset — never a 5xx.
+        tail = None
+        if not success:
+            tail = await self._ssh._read_log_tail(
+                state, settings.COMMAND_LOG_FAILURE_TAIL_LINES,
+            )
         async def updater(s: CommandState):
             if success:
                 s.mark_success(code, "")
@@ -106,6 +112,7 @@ class StateHelpers:
                 s.mark_failed(
                     f"Recovered from control_node marker: exit {code}.",
                     exit_code=code,
+                    output=tail,
                 )
 
         healed = await self.repo.update_if(

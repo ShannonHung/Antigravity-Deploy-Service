@@ -22,8 +22,10 @@
 ###############################################################################
 
 @base_url = http://localhost:8001
-@admin_user = admin
-@admin_pass = password
+#@admin_user = admin
+@admin_user = cluster_proxy
+# @admin_pass = password
+@admin_pass = cluster_proxy_dev_pw
 
 ### Get Token
 # @name login

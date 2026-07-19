@@ -421,6 +421,26 @@ class CommandExecutor:
             return None
         return "\n".join(output.split("\n")[-tail_lines:])
 
+    async def _maybe_backfill_output(
+        self, state: CommandState, logged: bool, success: bool, output: str,
+    ) -> str:
+        """For a failed ``logged`` command with an empty SSH channel, replace the
+        empty ``output`` with the control_node log tail.
+
+        Logged commands redirect their stdout/stderr to ``/dev/null`` on the
+        target (so the run survives the pod dying), so ``_collect_output``
+        returns "" — the real failure text lives only in the run log. We fetch
+        its tail here so the persisted output (and the API) shows why it failed.
+        Only triggers when logged AND failed AND the channel output is empty;
+        every other case keeps the original ``output`` unchanged.
+        """
+        if not (logged and not success and not output):
+            return output
+        tail = await self._ssh._read_log_tail(
+            state, settings.COMMAND_LOG_FAILURE_TAIL_LINES,
+        )
+        return tail or output
+
     async def _store_result(self, command_id: str, response: CommandExecutionResponse):
         """Persist a finished command's response into the existing Redis state machine with a new TTL."""
         ttl = settings.COMMAND_RESULT_TTL_SECONDS
@@ -653,6 +673,14 @@ class CommandExecutor:
             )
 
             success = returncode == 0
+            # Logged commands sever their output to /dev/null on the target, so a
+            # failure leaves `output` empty — backfill it from the control_node
+            # log tail so the API surfaces the real error (e.g. a clone failure).
+            if context.cmd_config.logged and not success and not output:
+                backfill_state = await self.repo.get(command_id)
+                output = await self._maybe_backfill_output(
+                    backfill_state, logged=True, success=False, output=output,
+                )
             stored_output = self._apply_output_policy(
                 context.cmd_config.logged, success, output,
             )

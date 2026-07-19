@@ -224,6 +224,43 @@ async def test_read_run_exit_marker_returns_none_when_absent(monkeypatch):
     assert await svc._state._read_run_exit_marker(state) is None
 
 
+async def test_heal_failed_backfills_output_from_log_tail(monkeypatch):
+    state = _state()
+    svc = _svc(state)
+    monkeypatch.setattr(svc._state, "_read_run_exit_marker", AsyncMock(return_value=128))
+    monkeypatch.setattr(
+        svc._state._ssh, "_read_log_tail",
+        AsyncMock(return_value="fatal: could not read Username\n"),
+    )
+    resp = await svc.get_command_execution_result("c1")
+    assert resp.status == CommandStatus.FAILED.value
+    assert resp.exit_status == 128
+    assert "could not read Username" in (resp.output or "")
+
+
+async def test_heal_success_does_not_read_log_tail(monkeypatch):
+    state = _state()
+    svc = _svc(state)
+    monkeypatch.setattr(svc._state, "_read_run_exit_marker", AsyncMock(return_value=0))
+    tail = AsyncMock(return_value="SHOULD-NOT-BE-USED")
+    monkeypatch.setattr(svc._state._ssh, "_read_log_tail", tail)
+    resp = await svc.get_command_execution_result("c1")
+    assert resp.status == CommandStatus.SUCCESS.value
+    tail.assert_not_awaited()
+
+
+async def test_heal_failed_survives_log_tail_none(monkeypatch):
+    state = _state()
+    svc = _svc(state)
+    monkeypatch.setattr(svc._state, "_read_run_exit_marker", AsyncMock(return_value=2))
+    monkeypatch.setattr(
+        svc._state._ssh, "_read_log_tail", AsyncMock(return_value=None))
+    resp = await svc.get_command_execution_result("c1")
+    assert resp.status == CommandStatus.FAILED.value
+    assert resp.exit_status == 2
+    assert resp.output is None
+
+
 async def test_unknown_command_still_raises_notfound():
     from app.core.exceptions import CommandExecutionException
     repo = MagicMock()
