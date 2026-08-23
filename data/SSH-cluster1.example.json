@@ -1,0 +1,8 @@
+{
+  "host": "localhost",
+  "port": 2222,
+  "username": "root",
+  "auth_method": "ca",
+  "key_base64": "<base64-encoded key \u2014 see make setup-ssh-nodes>",
+  "cert_base64": "<base64-encoded cert \u2014 see make setup-ssh-nodes>"
+}

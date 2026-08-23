@@ -73,3 +73,20 @@ async def test_read_log_tail_swallows_ssh_failure(monkeypatch):
         AsyncMock(side_effect=UpstreamUnavailableException("down")),
     )
     assert await ssh._read_log_tail(_state(), 50) is None
+
+
+async def test_read_log_tail_swallows_midread_channel_failure(monkeypatch):
+    """The channel can drop after connecting (control_node reboot, network
+    blip). That must be swallowed like a connect failure — a best-effort
+    backfill may never turn a poll into a 5xx.
+    """
+    import asyncssh
+
+    conn = MagicMock()
+    conn.run = AsyncMock(side_effect=asyncssh.ChannelOpenError(1, "channel gone"))
+    conn.close = MagicMock()
+    ssh = SshSupport()
+    monkeypatch.setattr(ssh, "_connect_to_control_node", AsyncMock(return_value=conn))
+
+    assert await ssh._read_log_tail(_state(), 50) is None
+    conn.close.assert_called_once()  # still cleaned up

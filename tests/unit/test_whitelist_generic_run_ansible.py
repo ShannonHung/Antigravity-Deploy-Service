@@ -18,7 +18,11 @@ DATA = Path(__file__).resolve().parents[2] / "data"
 
 
 def _wl():
-    return UserCommandWhitelist(**json.loads((DATA / "allow-commands-admin.json").read_text()))
+    # The tracked template, not the untracked machine-specific real file —
+    # these assert the whitelist's shape, which the template carries.
+    return UserCommandWhitelist(
+        **json.loads((DATA / "allow-commands-admin.example.json").read_text())
+    )
 
 
 def _cmd(name):

@@ -1,9 +1,25 @@
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 import asyncio
+import re
 from enum import Enum
 import asyncssh
 from pydantic import BaseModel, Field, model_validator
+
+
+def _compile_config_regex(pattern: str, field_label: str) -> "re.Pattern[str]":
+    """Compile a regex that came from a whitelist JSON file.
+
+    A typo in the config (e.g. ``"*"`` instead of ``".*"``) must fail loudly at
+    load time with a message naming the offending field, rather than raising a
+    bare ``re.error`` from deep inside request handling.
+    """
+    try:
+        return re.compile(pattern)
+    except re.error as exc:
+        raise ValueError(
+            f"{field_label}: invalid regex {pattern!r} ({exc})"
+        ) from exc
 
 
 # ── State Machine Domain Models ──────────────────────────────────────────────
@@ -86,6 +102,15 @@ class CommandArgumentConfig(BaseModel):
     required: bool = True  # when False, the arg may be omitted from the request
                            # and any pipeline tokens referencing it are dropped.
 
+    @model_validator(mode="after")
+    def _validate_regex(self) -> "CommandArgumentConfig":
+        if self.validation_regex:
+            _compile_config_regex(
+                self.validation_regex,
+                f"argument '{self.name}' validation_regex",
+            )
+        return self
+
 class PipelineStep(BaseModel):
     command: List[str]
 
@@ -118,6 +143,13 @@ class UserCommandWhitelist(BaseModel):
     allow_hosts: List[str] = [".*"]
     deny_hosts: List[str] = []
     allow_commands: List[CommandWhitelistConfig]
+
+    @model_validator(mode="after")
+    def _validate_host_patterns(self) -> "UserCommandWhitelist":
+        for field_name in ("allow_hosts", "deny_hosts"):
+            for pattern in getattr(self, field_name):
+                _compile_config_regex(pattern, field_name)
+        return self
 
 
 # ── SSH Configuration ────────────────────────────────────────────────────────

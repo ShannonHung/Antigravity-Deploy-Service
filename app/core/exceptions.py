@@ -174,6 +174,20 @@ class CommandExecutionException(BaseAppException):
     log_level = logging.WARNING
 
 
+class WhitelistConfigurationException(BaseAppException):
+    """Raised when a user's allow-commands whitelist file is malformed.
+
+    Surfaced as 500: the request itself is well-formed, but the operator-owned
+    config on disk (e.g. an invalid ``validation_regex`` or host pattern) cannot
+    be parsed. Distinct from ``COMMAND_EXECUTION_ERROR`` so callers can tell
+    "you sent something bad" apart from "the server is misconfigured".
+    """
+
+    http_status = 500
+    error_code = "WHITELIST_CONFIG_ERROR"
+    log_level = logging.ERROR
+
+
 class ScriptVersionException(BaseAppException):
     """Raised when a target script's version is below the required minimum.
 

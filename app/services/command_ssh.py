@@ -108,5 +108,14 @@ class SshSupport:
                 return None  # file absent / unreadable
             text = str(res.stdout) if res.stdout else ""
             return text or None
+        except (OSError, asyncssh.Error) as exc:
+            # The channel can still drop mid-tail (control_node reboot, network
+            # blip). Same contract as the connect failure above: a best-effort
+            # backfill must never turn a poll into a 5xx.
+            logger.info(
+                f"Log-tail read failed for {state.command_id}: {exc}",
+                extra={"command_id": state.command_id},
+            )
+            return None
         finally:
             conn.close()
