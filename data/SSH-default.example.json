@@ -3,5 +3,5 @@
   "port": 2223,
   "username": "root",
   "auth_method": "key",
-  "key_base64": "xxx"
+  "key_base64": "<base64-encoded key \u2014 see make setup-ssh-nodes>"
 }
