@@ -8,6 +8,8 @@ import shlex
 import asyncssh
 from typing import Any, List, Optional
 
+from pydantic import ValidationError
+
 from app.domain.command import (
     CommandExecutionRequest, CommandExecutionResponse,
     UserCommandWhitelist, ExecutionContext,
@@ -30,11 +32,20 @@ from app.core.exceptions import (
     ForbiddenException,
     ServiceUnavailableException,
     ScriptVersionException,
+    WhitelistConfigurationException,
 )
 from app.core.version import version_ge, version_max
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _format_validation_errors(exc: ValidationError) -> List[str]:
+    """Flatten a pydantic ValidationError into human-readable "loc: msg" lines."""
+    return [
+        f"{'.'.join(str(p) for p in err['loc']) or '<root>'}: {err['msg']}"
+        for err in exc.errors()
+    ]
 
 
 def _decode(stream: Any) -> str:
@@ -89,6 +100,9 @@ class CommandExecutor:
 
         Raises:
             ForbiddenException: If the configuration file does not exist.
+            WhitelistConfigurationException: If the file exists but is
+                malformed (e.g. an invalid regex in ``validation_regex`` /
+                ``allow_hosts``).
         """
         file_path = os.path.join(settings.COMMAND_CONFIG_DIR, f"allow-commands-{username}.json")
         if not os.path.exists(file_path):
@@ -98,7 +112,21 @@ class CommandExecutor:
             )
         with open(file_path, "r") as f:
             data = json.load(f)
-        return UserCommandWhitelist(**data)
+        try:
+            return UserCommandWhitelist(**data)
+        except ValidationError as exc:
+            # A malformed whitelist file (bad regex, missing field) is an
+            # operator mistake, not a caller mistake — surface it as a 500 with
+            # the offending field named, instead of letting a re.error escape
+            # from the middle of request validation.
+            logger.error(
+                f"Invalid command whitelist for user '{username}': {exc}",
+                extra={"username": username, "file_path": file_path},
+            )
+            raise WhitelistConfigurationException(
+                f"Command whitelist for user '{username}' is misconfigured.",
+                detail={"username": username, "errors": _format_validation_errors(exc)},
+            ) from exc
 
     async def _prepare_execution(
         self, username: str, request_id: str, req: CommandExecutionRequest,
