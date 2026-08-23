@@ -450,7 +450,7 @@ class CommandExecutor:
         return "\n".join(output.split("\n")[-tail_lines:])
 
     async def _maybe_backfill_output(
-        self, state: CommandState, logged: bool, success: bool, output: str,
+        self, state: Optional[CommandState], logged: bool, success: bool, output: str,
     ) -> str:
         """For a failed ``logged`` command with an empty SSH channel, replace the
         empty ``output`` with the control_node log tail.
@@ -461,8 +461,12 @@ class CommandExecutor:
         its tail here so the persisted output (and the API) shows why it failed.
         Only triggers when logged AND failed AND the channel output is empty;
         every other case keeps the original ``output`` unchanged.
+
+        ``state`` may be None when the Redis key expired between the run
+        starting and finishing — backfill is best-effort, so that degrades to
+        the original ``output`` rather than raising into the execution task.
         """
-        if not (logged and not success and not output):
+        if state is None or not (logged and not success and not output):
             return output
         tail = await self._ssh._read_log_tail(
             state, settings.COMMAND_LOG_FAILURE_TAIL_LINES,

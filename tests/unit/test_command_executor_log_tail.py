@@ -72,3 +72,19 @@ async def test_backfill_keeps_empty_when_tail_none(monkeypatch):
     out = await ex._maybe_backfill_output(
         state=_state(), logged=True, success=False, output="")
     assert out == ""
+
+
+async def test_backfill_returns_output_when_state_missing(monkeypatch):
+    """A None state (Redis key expired mid-run) must degrade, not raise.
+
+    `repo.get()` returns None once the key TTLs out. Backfill is best-effort,
+    so it has to fall back to the original output — raising here would fail the
+    result-storing path of a long-running command.
+    """
+    ex = _executor()
+    reader = AsyncMock(return_value="SHOULD-NOT-BE-USED")
+    monkeypatch.setattr(ex._ssh, "_read_log_tail", reader)
+    out = await ex._maybe_backfill_output(
+        state=None, logged=True, success=False, output="")
+    assert out == ""
+    reader.assert_not_awaited()

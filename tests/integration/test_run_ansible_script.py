@@ -692,3 +692,48 @@ def test_min_version_malformed_rejected(tmp_path):
     res = _run(tmp_path, "--run-id", "ok", "--min-version", "1.2")
     assert res.returncode != 0
     assert "version" in (res.stderr + res.stdout).lower()
+
+
+# A failing run must leave a marker in EVERY mode, not just `normal`. Without
+# the sidecar, _heal_from_marker keeps the run RUNNING until the Redis TTL
+# expires — the exact bug the failure-observability work exists to kill.
+
+def _run_mode(tmp_path, inventory, run_id):
+    """Run in --dry-run MODE (not DRYRUN=1, which exits before the clone and
+    before the marker trap is armed). Needs the fake git on PATH to clone."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    # Fake git: `git clone <repo> <dir>` creates the inventory the script
+    # validates, so a good --inventory proceeds and a bad one fails validation.
+    (bindir / "git").write_text(
+        "#!/usr/bin/env bash\n"
+        'dest="${@: -1}"\n'
+        'mkdir -p "$dest/taipei"\n'
+        'printf "[all]\\nnode1\\n" > "$dest/taipei/multinode.ini"\n'
+    )
+    os.chmod(bindir / "git", 0o755)
+    return subprocess.run(
+        ["bash", str(SCRIPT), "--dry-run", "--playbook", "ping.yml",
+         "--inventory", inventory, "--no-pull", "--log-dir", str(tmp_path),
+         "--run-id", run_id],
+        capture_output=True, text=True,
+        env={**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"},
+    )
+
+
+def test_dry_run_failure_writes_marker_and_sidecar(tmp_path):
+    res = _run_mode(tmp_path, "does/not/exist.ini", "dr-fail")
+    assert res.returncode != 0
+
+    sidecar = tmp_path / "dr-fail.exit"
+    assert sidecar.exists(), "failing dry-run must still write the .exit sidecar"
+    assert sidecar.read_text().strip() == str(res.returncode)
+    assert f"=== EXIT {res.returncode} ===" in (tmp_path / "dr-fail.log").read_text()
+
+
+def test_dry_run_success_writes_no_marker(tmp_path):
+    """Success keeps the marker a "normal run" concept — a dry-run that did no
+    real work must not report a terminal exit code."""
+    res = _run_mode(tmp_path, "taipei/multinode.ini", "dr-ok")
+    assert res.returncode == 0
+    assert not (tmp_path / "dr-ok.exit").exists()

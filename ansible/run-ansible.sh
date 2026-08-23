@@ -19,7 +19,7 @@ set -euo pipefail
 INVENTORY_NAMESPACE="https://gitlab.com/ShannonHung"
 INVENTORY_REPO_NAME="my-ansible-inventory"   # --inventory-repo-name <name>
 IMAGE="shannonhung/ansible-runner:latest"
-SCRIPT_VERSION="2.1.0"
+SCRIPT_VERSION="2.2.0"
 # Where the auto-generated vault password file is mounted INSIDE the container;
 # ANSIBLE_VAULT_PASSWORD_FILE is pointed here so ansible finds it automatically.
 VAULT_PASS_CONTAINER="/ansible_vault"
@@ -362,7 +362,9 @@ auth_label() {
 #     after resolve_log_file, so it fires in the OUTER shell after the pipe
 #     completes — the single place that should write the marker, regardless of
 #     which stage (clone, secret, inventory, ansible) failed. _MARKER_WRITTEN
-#     guards against this same trap firing more than once in one shell.
+#     is belt-and-braces: `cleanup` is armed on EXIT only, so today it cannot
+#     fire twice — the flag keeps that true if it is ever also armed on
+#     INT/TERM, where EXIT would still run afterwards.
 clone_cleanup() {
   rm -rf "${CLONE_DIR:-}" || true
 }
@@ -370,11 +372,14 @@ clone_cleanup() {
 _MARKER_WRITTEN=0
 cleanup() {
   local code="$?"
-  # Marker/sidecar are a "normal run" concept only (matches pre-existing
-  # behaviour: only run_normal ever wrote them). debug mode intentionally keeps
-  # the container + clone dir for manual inspection, and dry-run does no real
-  # work — neither should report a terminal exit code via the log/sidecar.
-  if [[ "$_MARKER_WRITTEN" -eq 0 && -n "$LOG_FILE" && "$MODE" == "normal" ]]; then
+  # A run that FAILED must always leave a marker, whatever the mode: the spec
+  # requires any stage exiting non-zero to be observable, and without the
+  # sidecar _heal_from_marker keeps the run RUNNING until the Redis TTL expires.
+  # On success the marker stays a "normal run" concept — debug mode keeps the
+  # container for manual inspection and dry-run does no real work, so neither
+  # should report a terminal exit code when nothing went wrong.
+  if [[ "$_MARKER_WRITTEN" -eq 0 && -n "$LOG_FILE" ]] \
+     && [[ "$MODE" == "normal" || "$code" -ne 0 ]]; then
     _MARKER_WRITTEN=1
     echo "=== EXIT $code ===" >> "$LOG_FILE" || true
     if [[ -n "$RUN_ID" ]]; then
