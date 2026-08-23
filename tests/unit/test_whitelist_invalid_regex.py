@@ -87,7 +87,12 @@ def test_loader_raises_app_exception_not_re_error(tmp_path, monkeypatch):
 
 
 def test_shipped_whitelists_have_valid_regexes():
-    """Guard the real config files in data/ against the same typo."""
+    """Guard the committed whitelist files against the same typo.
+
+    Covers the active config dir (tests/fixtures under APP_ENV=test) plus the
+    data/*.example.json templates, which are what a new deployment copies —
+    the real data/allow-commands-*.json are untracked and machine-specific.
+    """
     from pathlib import Path
 
     from app.core.config import get_settings
@@ -95,5 +100,9 @@ def test_shipped_whitelists_have_valid_regexes():
     config_dir = Path(get_settings().COMMAND_CONFIG_DIR)
     files = sorted(config_dir.glob("allow-commands-*.json"))
     assert files, f"no whitelist files found in {config_dir}"
-    for path in files:
+
+    examples = sorted(Path("data").glob("allow-commands-*.example.json"))
+    assert examples, "no data/allow-commands-*.example.json templates found"
+
+    for path in files + examples:
         UserCommandWhitelist(**json.loads(path.read_text()))

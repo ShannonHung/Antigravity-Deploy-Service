@@ -296,21 +296,32 @@ load_secrets() {
   # mangled token or decrypt with a mangled password. The value itself is never
   # printed. `set -a` above already marked these for export, so re-assigning
   # them keeps them exported.
-  local decoded
-  if [[ -n "${INVENTORY_TOKEN:-}" ]]; then
-    if ! decoded="$(printf '%s' "$INVENTORY_TOKEN" | base64 -d 2>/dev/null)"; then
-      echo "Error: INVENTORY_TOKEN in $SECRET_PATH is not valid base64." >&2
-      exit 2
-    fi
-    INVENTORY_TOKEN="$decoded"
+  INVENTORY_TOKEN="$(_decode_secret "${INVENTORY_TOKEN:-}" INVENTORY_TOKEN)"
+  ANSIBLE_VAULT_PASSWORD="$(_decode_secret "${ANSIBLE_VAULT_PASSWORD:-}" ANSIBLE_VAULT_PASSWORD)"
+}
+
+# Decode one base64 secret, or fail the run. Echoes the decoded value; empty in
+# means empty out (both secrets are optional: anonymous clone / no-vault runs
+# supply neither).
+#
+# `base64 -d` alone is NOT a sufficient check: most plaintext is also
+# base64-alphabet-clean, so a legacy plaintext value (a `glpat-…` token, say)
+# decodes to binary mush instead of erroring, and the run fails later with a
+# confusing auth error. Re-encoding the result and comparing catches that —
+# genuine base64 round-trips, mangled plaintext does not. Values are never
+# printed, only their variable name.
+_decode_secret() {
+  local raw="$1" name="$2" decoded
+  [[ -z "$raw" ]] && return 0
+
+  if ! decoded="$(printf '%s' "$raw" | base64 -d 2>/dev/null)" \
+     || [[ "$(printf '%s' "$decoded" | base64 | tr -d '\n')" != "$(printf '%s' "$raw" | tr -d '\n')" ]]; then
+    echo "Error: $name in $SECRET_PATH is not valid base64." >&2
+    echo "       Values in the secret file must be base64-encoded; encode an" >&2
+    echo "       existing plaintext value with: printf '%s' '<value>' | base64" >&2
+    exit 2
   fi
-  if [[ -n "${ANSIBLE_VAULT_PASSWORD:-}" ]]; then
-    if ! decoded="$(printf '%s' "$ANSIBLE_VAULT_PASSWORD" | base64 -d 2>/dev/null)"; then
-      echo "Error: ANSIBLE_VAULT_PASSWORD in $SECRET_PATH is not valid base64." >&2
-      exit 2
-    fi
-    ANSIBLE_VAULT_PASSWORD="$decoded"
-  fi
+  printf '%s' "$decoded"
 }
 
 # Auto-generate the vault password file next to this script (VAULT_PASS_FILE),

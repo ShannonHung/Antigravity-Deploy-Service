@@ -28,6 +28,11 @@ htmlcov/
 # ── Data files ───────────────────────────────────────────────────────────────
 data/SSH*.json
 data/ssh_keys/
+# Real whitelists carry environment-specific absolute paths (and are edited
+# per-deployment). Track the *.example.json templates instead; copy one and
+# drop the .example to activate it.
+data/allow-commands-*.json
+!data/allow-commands-*.example.json
 
 # ── Test-generated SSH key (created on the fly by tests/conftest.py) ────────
 tests/fixtures/SSH-default.json
