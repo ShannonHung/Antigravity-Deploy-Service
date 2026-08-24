@@ -1,8 +1,0 @@
-{
-  "host": "localhost",
-  "port": 2222,
-  "username": "root",
-  "auth_method": "ca",
-  "key_base64": "xxx",
-  "cert_base64": "xxx"
-}
