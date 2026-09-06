@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from app.core.exceptions import (
-    CommandExecutionException, ForbiddenException, ServiceUnavailableException,
+    CommandExecutionException,
+    ForbiddenException,
+    ServiceUnavailableException,
 )
 from app.domain.command import CommandExecutionRequest
 from app.services.command_service import CommandService
@@ -15,7 +17,9 @@ import app.services.command_service as cs_mod
 import app.services.command_executor as ce_mod
 import app.services.command_pool as cp_mod
 from app.repositories.inventory_repository import (
-    ClusterNodeInfo, ClusterRef, NodeInfo,
+    ClusterNodeInfo,
+    ClusterRef,
+    NodeInfo,
 )
 from tests.fixtures.cluster import InMemoryInventoryRepository
 
@@ -36,6 +40,7 @@ def _ssh_default(tmp_path: Path) -> Path:
 def svc(tmp_path, monkeypatch):
     """Service with COMMAND_CONFIG_DIR pointed at an isolated tmp dir."""
     from app.core.config import get_settings
+
     get_settings.cache_clear()
     monkeypatch.setenv("COMMAND_CONFIG_DIR", str(tmp_path))
     get_settings.cache_clear()
@@ -48,20 +53,24 @@ def svc(tmp_path, monkeypatch):
     monkeypatch.setattr(ce_mod, "settings", new_settings)
     monkeypatch.setattr(cp_mod, "settings", new_settings)
 
-    inventory_repo = InMemoryInventoryRepository(nodes={
-        "node-a01": ClusterNodeInfo(
-            node_type="baremetal",
-            node=NodeInfo(id="1", name="node-a01", labels={"mgmt_ip": "10.0.1.10"}),
-            cluster=ClusterRef(id="1", name="cluster-c1"),
-        ),
-    })
+    inventory_repo = InMemoryInventoryRepository(
+        nodes={
+            "node-a01": ClusterNodeInfo(
+                node_type="baremetal",
+                node=NodeInfo(id="1", name="node-a01", labels={"mgmt_ip": "10.0.1.10"}),
+                cluster=ClusterRef(id="1", name="cluster-c1"),
+            ),
+        }
+    )
     return CommandService(repo=None, inventory_repo=inventory_repo), tmp_path
 
 
 async def test_no_whitelist_file_raises_forbidden(svc):
     service, _ = svc
     req = CommandExecutionRequest(
-        command_name="ls", host="10.0.0.1", username="root",
+        command_name="ls",
+        host="10.0.0.1",
+        username="root",
     )
     with pytest.raises(ForbiddenException):
         await service._executor._prepare_execution("test_admin", "rid", req)
@@ -69,16 +78,27 @@ async def test_no_whitelist_file_raises_forbidden(svc):
 
 async def test_deny_host_raises_forbidden(svc):
     service, tmp_path = svc
-    _whitelist_file(tmp_path, {
-        "name": "admin", "allow_hosts": [".*"], "deny_hosts": ["10\\.0\\.1\\.10"],
-        "allow_commands": [{
-            "command_name": "ls", "pipeline": [{"command": ["ls"]}],
-            "arguments": [],
-        }],
-    })
+    _whitelist_file(
+        tmp_path,
+        {
+            "name": "admin",
+            "allow_hosts": [".*"],
+            "deny_hosts": ["10\\.0\\.1\\.10"],
+            "allow_commands": [
+                {
+                    "command_name": "ls",
+                    "pipeline": [{"command": ["ls"]}],
+                    "arguments": [],
+                }
+            ],
+        },
+    )
     _ssh_default(tmp_path)
     req = CommandExecutionRequest(
-        command_name="ls", host="node-a01", username="root", host_type="hostname",
+        command_name="ls",
+        host="node-a01",
+        username="root",
+        host_type="hostname",
     )
     with pytest.raises(ForbiddenException):
         await service._executor._prepare_execution("test_admin", "rid", req)
@@ -86,16 +106,26 @@ async def test_deny_host_raises_forbidden(svc):
 
 async def test_command_not_in_whitelist_raises_forbidden(svc):
     service, tmp_path = svc
-    _whitelist_file(tmp_path, {
-        "name": "admin", "allow_hosts": [".*"], "deny_hosts": [],
-        "allow_commands": [{
-            "command_name": "ls", "pipeline": [{"command": ["ls"]}],
-            "arguments": [],
-        }],
-    })
+    _whitelist_file(
+        tmp_path,
+        {
+            "name": "admin",
+            "allow_hosts": [".*"],
+            "deny_hosts": [],
+            "allow_commands": [
+                {
+                    "command_name": "ls",
+                    "pipeline": [{"command": ["ls"]}],
+                    "arguments": [],
+                }
+            ],
+        },
+    )
     _ssh_default(tmp_path)
     req = CommandExecutionRequest(
-        command_name="reboot", host="10.0.0.1", username="root",
+        command_name="reboot",
+        host="10.0.0.1",
+        username="root",
     )
     with pytest.raises(ForbiddenException):
         await service._executor._prepare_execution("test_admin", "rid", req)
@@ -103,16 +133,29 @@ async def test_command_not_in_whitelist_raises_forbidden(svc):
 
 async def test_missing_argument_raises_command_execution_exception(svc):
     service, tmp_path = svc
-    _whitelist_file(tmp_path, {
-        "name": "admin", "allow_hosts": [".*"], "deny_hosts": [],
-        "allow_commands": [{
-            "command_name": "sleep", "pipeline": [{"command": ["sleep", "{time}"]}],
-            "arguments": [{"name": "time", "type": "int", "validation_regex": "^\\d+$"}],
-        }],
-    })
+    _whitelist_file(
+        tmp_path,
+        {
+            "name": "admin",
+            "allow_hosts": [".*"],
+            "deny_hosts": [],
+            "allow_commands": [
+                {
+                    "command_name": "sleep",
+                    "pipeline": [{"command": ["sleep", "{time}"]}],
+                    "arguments": [
+                        {"name": "time", "type": "int", "validation_regex": "^\\d+$"}
+                    ],
+                }
+            ],
+        },
+    )
     _ssh_default(tmp_path)
     req = CommandExecutionRequest(
-        command_name="sleep", host="10.0.0.1", username="root", arguments={},
+        command_name="sleep",
+        host="10.0.0.1",
+        username="root",
+        arguments={},
     )
     with pytest.raises(CommandExecutionException):
         await service._executor._prepare_execution("test_admin", "rid", req)

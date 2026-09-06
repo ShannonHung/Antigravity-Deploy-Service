@@ -17,7 +17,9 @@ class _EmptyCommandStateRepo:
 @pytest.fixture
 def trace_client():
     app = create_app()
-    app.dependency_overrides[get_command_state_repository] = lambda: _EmptyCommandStateRepo()
+    app.dependency_overrides[get_command_state_repository] = (
+        lambda: _EmptyCommandStateRepo()
+    )
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()

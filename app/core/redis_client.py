@@ -6,6 +6,7 @@ from app.core.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
+
 class RedisClient:
     _instance: Optional[redis.Redis] = None
     _binary_instance: Optional[redis.Redis] = None
@@ -15,9 +16,7 @@ class RedisClient:
         if cls._instance is None:
             logger.info(f"Connecting to Redis at {settings.REDIS_URL}")
             cls._instance = redis.from_url(
-                settings.REDIS_URL,
-                encoding="utf-8",
-                decode_responses=True
+                settings.REDIS_URL, encoding="utf-8", decode_responses=True
             )
         return cls._instance
 
@@ -30,9 +29,7 @@ class RedisClient:
         ``UnicodeDecodeError`` on the first non-utf-8 byte.
         """
         if cls._binary_instance is None:
-            logger.info(
-                f"Connecting to Redis (binary) at {settings.REDIS_URL}"
-            )
+            logger.info(f"Connecting to Redis (binary) at {settings.REDIS_URL}")
             cls._binary_instance = redis.from_url(
                 settings.REDIS_URL,
                 decode_responses=False,

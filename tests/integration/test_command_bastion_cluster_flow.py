@@ -24,7 +24,11 @@ def _inventory_repo():
         nodes={
             "node1": ClusterNodeInfo(
                 node_type="baremetal",
-                node=NodeInfo(id="1", name="node1", labels={"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"}),
+                node=NodeInfo(
+                    id="1",
+                    name="node1",
+                    labels={"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"},
+                ),
                 cluster=ClusterRef(id="1", name="type1-cluster-c1"),
             ),
             "node2": ClusterNodeInfo(
@@ -43,16 +47,22 @@ def _inventory_repo():
             "type1": [
                 BastionMapping(
                     patterns=["type1-cluster-(c1|c2|c3)", "type1-cluster.*"],
-                    runner="r1", bastion="b1", bastion_ip="10.1.1.1",
+                    runner="r1",
+                    bastion="b1",
+                    bastion_ip="10.1.1.1",
                 ),
                 BastionMapping(
-                    patterns=["type1-kind"], runner="r2", bastion="b2",
+                    patterns=["type1-kind"],
+                    runner="r2",
+                    bastion="b2",
                     bastion_ip="10.1.1.2",
                 ),
             ],
             "type2": [
                 BastionMapping(
-                    patterns=["type2-cluster.*"], runner="r3", bastion="b3",
+                    patterns=["type2-cluster.*"],
+                    runner="r3",
+                    bastion="b3",
                     bastion_ip="10.2.2.2",
                 ),
             ],
@@ -68,7 +78,9 @@ def client_full(monkeypatch):
         {"baremetal": "type1", "virtual-machine": "type2"},
     )
     app = create_app()
-    app.dependency_overrides[get_command_state_repository] = lambda: _InMemoryCommandStateRepo()
+    app.dependency_overrides[get_command_state_repository] = (
+        lambda: _InMemoryCommandStateRepo()
+    )
     app.dependency_overrides[get_inventory_repository] = lambda: _inventory_repo()
     with TestClient(app) as c:
         yield c
@@ -117,7 +129,8 @@ def test_explicit_bastion_type_in_option_overrides_node_type_map(client_full):
     p, _ = _patch_asyncssh()
     with p as mock_connect:
         resp = _post(
-            client_full, host="node2",
+            client_full,
+            host="node2",
             option={"timeout_seconds": 30, "bastion_type": "type2"},
         )
         assert resp.status_code == 200, resp.text
@@ -126,7 +139,8 @@ def test_explicit_bastion_type_in_option_overrides_node_type_map(client_full):
 
 def test_unknown_bastion_type_in_option_returns_404(client_full):
     resp = _post(
-        client_full, host="node1",
+        client_full,
+        host="node1",
         option={"timeout_seconds": 30, "bastion_type": "no-such-type"},
     )
     assert resp.status_code == 404

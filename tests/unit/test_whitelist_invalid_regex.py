@@ -44,7 +44,10 @@ def test_empty_validation_regex_is_allowed():
     """An omitted regex means "no regex check" — it must not be compiled."""
     body = _whitelist()
     body["allow_commands"][0]["arguments"][0]["validation_regex"] = ""
-    assert UserCommandWhitelist(**body).allow_commands[0].arguments[0].validation_regex == ""
+    assert (
+        UserCommandWhitelist(**body).allow_commands[0].arguments[0].validation_regex
+        == ""
+    )
 
 
 def test_invalid_argument_regex_rejected():
@@ -57,7 +60,7 @@ def test_invalid_argument_regex_rejected():
     msg = str(exc_info.value)
     assert "validation_regex" in msg
     assert "'time'" in msg  # names the offending argument
-    assert "'*'" in msg     # and the offending pattern
+    assert "'*'" in msg  # and the offending pattern
 
 
 @pytest.mark.parametrize("field", ["allow_hosts", "deny_hosts"])

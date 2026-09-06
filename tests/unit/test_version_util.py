@@ -14,7 +14,7 @@ def test_parse_semver_rejects_malformed(bad):
 
 
 def test_version_ge_numeric_not_lexicographic():
-    assert version_ge("1.10.0", "1.9.0") is True   # numeric: 10 > 9
+    assert version_ge("1.10.0", "1.9.0") is True  # numeric: 10 > 9
     assert version_ge("1.9.0", "1.10.0") is False
 
 

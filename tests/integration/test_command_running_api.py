@@ -15,9 +15,16 @@ def _token(client, account):
 
 def _state(cid, status):
     return CommandState(
-        command_id=cid, status=status, host="h", resolved_ip="1.1.1.1",
-        port=22, username="root", ssh_config="default", request_id="r",
-        exec_command="true", killable=False,
+        command_id=cid,
+        status=status,
+        host="h",
+        resolved_ip="1.1.1.1",
+        port=22,
+        username="root",
+        ssh_config="default",
+        request_id="r",
+        exec_command="true",
+        killable=False,
     )
 
 

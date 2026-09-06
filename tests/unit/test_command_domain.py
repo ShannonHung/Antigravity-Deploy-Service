@@ -2,8 +2,11 @@ import pytest
 from pydantic import ValidationError
 
 from app.domain.command import (
-    CommandExecutionRequest, CommandExecutionResponse,
-    CommandState, CommandStatus, HostType,
+    CommandExecutionRequest,
+    CommandExecutionResponse,
+    CommandState,
+    CommandStatus,
+    HostType,
 )
 
 
@@ -15,14 +18,19 @@ def test_host_type_enum_values():
 
 def test_request_defaults_host_type_to_ip():
     req = CommandExecutionRequest(
-        command_name="ls", host="10.0.0.1", username="root",
+        command_name="ls",
+        host="10.0.0.1",
+        username="root",
     )
     assert req.host_type == HostType.IP
 
 
 def test_request_accepts_explicit_host_type():
     req = CommandExecutionRequest(
-        command_name="ls", host="node-a01", username="root", host_type="hostname",
+        command_name="ls",
+        host="node-a01",
+        username="root",
+        host_type="hostname",
     )
     assert req.host_type == HostType.HOSTNAME
 
@@ -30,7 +38,10 @@ def test_request_accepts_explicit_host_type():
 def test_request_rejects_unknown_host_type():
     with pytest.raises(ValidationError):
         CommandExecutionRequest(
-            command_name="ls", host="x", username="root", host_type="dns",
+            command_name="ls",
+            host="x",
+            username="root",
+            host_type="dns",
         )
 
 

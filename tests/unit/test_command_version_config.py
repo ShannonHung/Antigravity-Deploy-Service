@@ -33,15 +33,25 @@ def test_checks_true_with_malformed_min_rejected():
 
 
 def test_request_min_script_version_optional_and_validated():
-    assert CommandExecutionRequest(
-        command_name="run_ansible", host="h", username="u"
-    ).min_script_version is None
-    assert CommandExecutionRequest(
-        command_name="run_ansible", host="h", username="u",
-        min_script_version="1.5.0",
-    ).min_script_version == "1.5.0"
+    assert (
+        CommandExecutionRequest(
+            command_name="run_ansible", host="h", username="u"
+        ).min_script_version
+        is None
+    )
+    assert (
+        CommandExecutionRequest(
+            command_name="run_ansible",
+            host="h",
+            username="u",
+            min_script_version="1.5.0",
+        ).min_script_version
+        == "1.5.0"
+    )
     with pytest.raises(ValidationError):
         CommandExecutionRequest(
-            command_name="run_ansible", host="h", username="u",
+            command_name="run_ansible",
+            host="h",
+            username="u",
             min_script_version="bad",
         )

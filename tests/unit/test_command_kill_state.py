@@ -10,6 +10,7 @@ Two guarantees:
   2. Any command that does enter KILLING is reconciled by the marker heal
      (see test_command_orphan_heal for the heal of KILLING).
 """
+
 from unittest.mock import AsyncMock
 
 from app.domain.command import CommandState, CommandStatus, RunningCommandEntry
@@ -19,10 +20,17 @@ import app.services.command_service as cs
 
 def _state(**over):
     base = dict(
-        command_id="c1", status=CommandStatus.RUNNING, host="h",
-        resolved_ip="1.2.3.4", port=2224, username="root",
-        ssh_config="control_node", request_id="r1", exec_command="x",
-        killable=False, run_log_path="/var/log/ansible-runs/c1.log",
+        command_id="c1",
+        status=CommandStatus.RUNNING,
+        host="h",
+        resolved_ip="1.2.3.4",
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        request_id="r1",
+        exec_command="x",
+        killable=False,
+        run_log_path="/var/log/ansible-runs/c1.log",
     )
     base.update(over)
     return CommandState(**base)
@@ -53,9 +61,13 @@ async def test_kill_non_killable_local_does_not_strand_in_killing():
     state = _state(killable=False)
     svc = CommandService(repo=_Repo(state), inventory_repo=None)
     # Present in the local running pool but flagged non-killable.
-    cs.pool_add("c1", RunningCommandEntry(
-        host_ip="1.2.3.4", killable=False,
-    ))
+    cs.pool_add(
+        "c1",
+        RunningCommandEntry(
+            host_ip="1.2.3.4",
+            killable=False,
+        ),
+    )
     try:
         await svc.kill_command("c1")
     finally:

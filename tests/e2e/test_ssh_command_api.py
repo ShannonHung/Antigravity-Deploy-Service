@@ -19,6 +19,7 @@ def _get_token(client: TestClient, account: str = "test_admin") -> str:
     resp = client.post("/token", data={"username": account, "password": "secret"})
     return resp.json()["access_token"]
 
+
 def test_execute_list_file(client: TestClient):
     token = _get_token(client, "test_admin")
     resp = client.post(
@@ -31,14 +32,15 @@ def test_execute_list_file(client: TestClient):
             "username": "root",
             "ssh_config": "cluster1",
             "option": {"timeout_seconds": 10},
-            "arguments": {"key_word": "ssh"}
-        }
+            "arguments": {"key_word": "ssh"},
+        },
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     print("DEBUG RESPONSE:", data)
     assert data["status"] == "running"
     assert "command_id" in data
+
 
 def test_execute_invalid_argument_regex(client: TestClient):
     token = _get_token(client, "test_admin")
@@ -50,13 +52,14 @@ def test_execute_invalid_argument_regex(client: TestClient):
             "host": "localhost",
             "port": 2222,
             "username": "root",
-            "arguments": {"time": "notanint"}
-        }
+            "arguments": {"time": "notanint"},
+        },
     )
     assert resp.status_code == 400, resp.text
     body = resp.json()
     assert body["error"]["code"] == "COMMAND_EXECUTION_ERROR"
     assert "does not match validation regex" in body["error"]["message"]
+
 
 def test_execute_reboot_fire_and_forget(client: TestClient):
     token = _get_token(client, "test_admin")
@@ -69,8 +72,8 @@ def test_execute_reboot_fire_and_forget(client: TestClient):
             "port": 2222,
             "username": "root",
             "ssh_config": "cluster1",
-            "arguments": {}
-        }
+            "arguments": {},
+        },
     )
     assert resp.status_code == 200
     data = resp.json()["data"]

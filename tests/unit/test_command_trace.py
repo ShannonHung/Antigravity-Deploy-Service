@@ -8,10 +8,17 @@ from app.core.config import get_settings
 
 def _state(**over):
     base = dict(
-        command_id="c1", status=CommandStatus.RUNNING, host="h",
-        resolved_ip="1.2.3.4", port=2224, username="root",
-        ssh_config="control_node", request_id="r1", exec_command="x",
-        killable=True, run_log_path="/var/log/ansible-runs/c1.log",
+        command_id="c1",
+        status=CommandStatus.RUNNING,
+        host="h",
+        resolved_ip="1.2.3.4",
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        request_id="r1",
+        exec_command="x",
+        killable=True,
+        run_log_path="/var/log/ansible-runs/c1.log",
     )
     base.update(over)
     return CommandState(**base)
@@ -39,7 +46,8 @@ async def test_trace_logged_command_is_not_flagged_not_logged(monkeypatch):
     # A logged command (run_log_path set) must NOT carry the not_logged flag.
     svc = _svc_with_state(_state(run_log_path="/var/log/deploy-service/c1.log"))
     monkeypatch.setattr(
-        svc._trace, "_read_remote_log",
+        svc._trace,
+        "_read_remote_log",
         AsyncMock(return_value=(0, "")),
     )
     resp = await svc.get_command_trace("c1", byte_offset=0, line_num=1)
@@ -49,6 +57,7 @@ async def test_trace_logged_command_is_not_flagged_not_logged(monkeypatch):
 async def test_trace_unknown_command_raises_notfound():
     repo = MagicMock()
     from app.core.exceptions import CommandExecutionException
+
     repo.get = AsyncMock(side_effect=CommandExecutionException("nope"))
     svc = CommandService(repo=repo, inventory_repo=None)
     with pytest.raises(NotFoundException):
@@ -58,7 +67,8 @@ async def test_trace_unknown_command_raises_notfound():
 async def test_trace_happy_path_renders_new_lines(monkeypatch):
     svc = _svc_with_state(_state())
     monkeypatch.setattr(
-        svc._trace, "_read_remote_log",
+        svc._trace,
+        "_read_remote_log",
         AsyncMock(return_value=(18, "line one\nline two\n")),
     )
     resp = await svc.get_command_trace("c1", byte_offset=0, line_num=1)
@@ -73,7 +83,9 @@ async def test_trace_hard_cap_stops_serving_lines(monkeypatch):
     svc = _svc_with_state(_state())
     big = get_settings().COMMAND_LOG_HARD_CAP_BYTES + 1
     monkeypatch.setattr(
-        svc._trace, "_read_remote_log", AsyncMock(return_value=(big, "x\n")),
+        svc._trace,
+        "_read_remote_log",
+        AsyncMock(return_value=(big, "x\n")),
     )
     resp = await svc.get_command_trace("c1", byte_offset=0, line_num=1)
     assert resp.too_large is True
@@ -85,13 +97,19 @@ async def test_trace_hard_cap_reports_where_to_read_the_log(monkeypatch):
     # log lives so they can read it directly on the control_node: the host/ip,
     # port, SSH account, and the file path.
     get_settings.cache_clear()
-    svc = _svc_with_state(_state(
-        resolved_ip="10.0.0.7", port=2224, username="root",
-        run_log_path="/var/log/ansible-runs/c1.log",
-    ))
+    svc = _svc_with_state(
+        _state(
+            resolved_ip="10.0.0.7",
+            port=2224,
+            username="root",
+            run_log_path="/var/log/ansible-runs/c1.log",
+        )
+    )
     big = get_settings().COMMAND_LOG_HARD_CAP_BYTES + 1
     monkeypatch.setattr(
-        svc._trace, "_read_remote_log", AsyncMock(return_value=(big, "x\n")),
+        svc._trace,
+        "_read_remote_log",
+        AsyncMock(return_value=(big, "x\n")),
     )
     resp = await svc.get_command_trace("c1", byte_offset=0, line_num=1)
     assert resp.too_large is True
@@ -106,7 +124,8 @@ async def test_trace_normal_response_omits_location_fields(monkeypatch):
     # leave them None to keep the response lean.
     svc = _svc_with_state(_state())
     monkeypatch.setattr(
-        svc._trace, "_read_remote_log",
+        svc._trace,
+        "_read_remote_log",
         AsyncMock(return_value=(18, "line one\nline two\n")),
     )
     resp = await svc.get_command_trace("c1", byte_offset=0, line_num=1)
@@ -119,6 +138,7 @@ async def test_read_remote_log_calls_conn_run_with_single_command_string(monkeyp
     blew up with 'create_session() takes 2-3 positional arguments but 6 given'.
     The server-generated path must be shlex-quoted into that string."""
     import shlex
+
     svc = _svc_with_state(_state(run_log_path="/var/log/ansible-runs/c 1.log"))
 
     calls = []
@@ -211,7 +231,9 @@ async def test_trace_soft_cap_sets_warning_but_serves(monkeypatch):
     svc = _svc_with_state(_state())
     mid = get_settings().COMMAND_LOG_SOFT_CAP_BYTES + 1
     monkeypatch.setattr(
-        svc._trace, "_read_remote_log", AsyncMock(return_value=(mid, "hello\n")),
+        svc._trace,
+        "_read_remote_log",
+        AsyncMock(return_value=(mid, "hello\n")),
     )
     resp = await svc.get_command_trace("c1", byte_offset=0, line_num=1)
     assert resp.size_warning is True

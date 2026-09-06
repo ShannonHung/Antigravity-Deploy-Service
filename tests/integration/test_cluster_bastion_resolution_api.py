@@ -18,8 +18,22 @@ def _token(client, account="test_admin"):
 def client():
     inv = InMemoryInventoryRepository(
         mappings={
-            "type1": [BastionMapping(patterns=["taiwan-.*"], runner="r1", bastion="b1", bastion_ip="10.1.0.1")],
-            "type2": [BastionMapping(patterns=["taiwan-taipei/.*"], runner="r2", bastion="b2", bastion_ip="10.2.0.2")],
+            "type1": [
+                BastionMapping(
+                    patterns=["taiwan-.*"],
+                    runner="r1",
+                    bastion="b1",
+                    bastion_ip="10.1.0.1",
+                )
+            ],
+            "type2": [
+                BastionMapping(
+                    patterns=["taiwan-taipei/.*"],
+                    runner="r2",
+                    bastion="b2",
+                    bastion_ip="10.2.0.2",
+                )
+            ],
         }
     )
     app = create_app()

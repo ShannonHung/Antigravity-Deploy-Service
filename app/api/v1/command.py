@@ -7,7 +7,7 @@ from app.domain.command import (
     CommandExecutionRequest, CommandExecutionResponse,
     CommandStatus, CommandTraceResponse,
     UserCommandWhitelist, CommandWhitelistConfig,
-    RunningCommandsResponse,
+    RunningCommandsResponse, OutputFormat,
 )
 from app.core.log_viewer_template import LOG_VIEWER_HTML
 from app.services.command_service import CommandService
@@ -99,14 +99,31 @@ async def execute_command_endpoint(
     "/execution/{command_id}",
     response_model=ApiResponse[CommandExecutionResponse],
     summary="Poll Command Execution Result",
+    description=(
+        "Returns a command's current status and result.\n\n"
+        "`format=raw` (the default) is the historical response. `format=json` "
+        "additionally parses the command's stdout into `output_json`, and is "
+        "accepted only for commands whose whitelist entry declares "
+        "`output_format: \"json\"` (see GET /command/{command_name}/info) — "
+        "asking for it on any other command is a 400. `output` itself always "
+        "keeps its raw string value. When parsing does not happen, "
+        "`output_json_error` says why."
+    ),
 )
 async def get_command_execution_status(
     command_id: str,
     request: Request,
+    format: OutputFormat = Query(
+        default=OutputFormat.RAW,
+        description=(
+            "raw = unchanged response; json = also parse stdout into "
+            "output_json (requires the command to declare output_format json)."
+        ),
+    ),
     current_user: User = Depends(get_current_user(["command_api"])),
     svc: CommandService = Depends(get_command_service),
 ) -> ApiResponse[CommandExecutionResponse]:
-    response_data = await svc.get_command_execution_result(command_id)
+    response_data = await svc.get_command_execution_result(command_id, format)
     return ApiResponse(data=response_data, request_id=_request_id(request))
 
 

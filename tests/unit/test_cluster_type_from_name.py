@@ -7,11 +7,17 @@ SLASH_MAP = {"no_slash": "type1", "with_slash": "type2"}
 
 
 def test_no_slash_selects_no_slash_type():
-    assert cluster_type_from_name("taiwan-taipei-my-cluster", SLASH_MAP) == ("type1", False)
+    assert cluster_type_from_name("taiwan-taipei-my-cluster", SLASH_MAP) == (
+        "type1",
+        False,
+    )
 
 
 def test_slash_selects_with_slash_type():
-    assert cluster_type_from_name("taiwan-taipei/my-cluster", SLASH_MAP) == ("type2", True)
+    assert cluster_type_from_name("taiwan-taipei/my-cluster", SLASH_MAP) == (
+        "type2",
+        True,
+    )
 
 
 def test_missing_key_raises():

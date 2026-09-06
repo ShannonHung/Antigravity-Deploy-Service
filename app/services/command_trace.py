@@ -18,7 +18,9 @@ class CommandTrace:
         self._state = state
         self._ssh = ssh
 
-    async def _read_remote_log(self, state: CommandState, byte_offset: int) -> tuple[int, str]:
+    async def _read_remote_log(
+        self, state: CommandState, byte_offset: int
+    ) -> tuple[int, str]:
         """SSH to the control_node and read the run log tail.
 
         Returns ``(total_size, new_text)``. If the file does not exist yet
@@ -45,14 +47,17 @@ class CommandTrace:
                 # so don't pull a multi-MB tail back over SSH just to drop it.
                 return total_size, ""
             tail_res = await conn.run(
-                f"tail -c +{byte_offset + 1} {quoted_path}", check=False,
+                f"tail -c +{byte_offset + 1} {quoted_path}",
+                check=False,
             )
             new_text = str(tail_res.stdout) if tail_res.stdout else ""
             return total_size, new_text
         finally:
             conn.close()
 
-    async def get_command_trace(self, command_id: str, byte_offset: int = 0, line_num: int = 1) -> CommandTraceResponse:
+    async def get_command_trace(
+        self, command_id: str, byte_offset: int = 0, line_num: int = 1
+    ) -> CommandTraceResponse:
         """Incremental tail of a logged command's run log for the UI viewer.
 
         Loads the CommandState pointer from Redis, SSHes to the control_node,
@@ -64,15 +69,20 @@ class CommandTrace:
         """
         state = await self._state._get_state_or_404(command_id)
 
-        status = state.status.value if hasattr(state.status, "value") else str(state.status)
+        status = (
+            state.status.value if hasattr(state.status, "value") else str(state.status)
+        )
 
         if not state.run_log_path:
             # Command wasn't run with logged:true, so no run log was ever
             # tee'd to the control_node. Flag it so the viewer shows an
             # explanatory notice instead of polling an empty page forever.
             return CommandTraceResponse(
-                command_id=command_id, status=status,
-                next_byte_offset=byte_offset, next_line_num=line_num, lines=[],
+                command_id=command_id,
+                status=status,
+                next_byte_offset=byte_offset,
+                next_line_num=line_num,
+                lines=[],
                 not_logged=True,
             )
 
@@ -82,11 +92,17 @@ class CommandTrace:
             # Give up rendering, but tell the user exactly where to read the full
             # log on the control_node (ssh + tail), since the browser can't.
             return CommandTraceResponse(
-                command_id=command_id, status=status,
-                next_byte_offset=byte_offset, next_line_num=line_num,
-                lines=[], total_size=total_size, too_large=True,
-                log_host=state.resolved_ip, log_port=state.port,
-                log_user=state.username, log_file_path=state.run_log_path,
+                command_id=command_id,
+                status=status,
+                next_byte_offset=byte_offset,
+                next_line_num=line_num,
+                lines=[],
+                total_size=total_size,
+                too_large=True,
+                log_host=state.resolved_ip,
+                log_port=state.port,
+                log_user=state.username,
+                log_file_path=state.run_log_path,
             )
 
         size_warning = total_size > settings.COMMAND_LOG_SOFT_CAP_BYTES
@@ -97,9 +113,13 @@ class CommandTrace:
             last_nl = new_text.rfind("\n")
             if last_nl == -1:
                 return CommandTraceResponse(
-                    command_id=command_id, status=status,
-                    next_byte_offset=byte_offset, next_line_num=line_num,
-                    lines=[], total_size=total_size, size_warning=size_warning,
+                    command_id=command_id,
+                    status=status,
+                    next_byte_offset=byte_offset,
+                    next_line_num=line_num,
+                    lines=[],
+                    total_size=total_size,
+                    size_warning=size_warning,
                 )
             held_back = len(new_text) - (last_nl + 1)
             new_text = new_text[: last_nl + 1]
@@ -107,17 +127,26 @@ class CommandTrace:
 
         if not new_text:
             return CommandTraceResponse(
-                command_id=command_id, status=status,
-                next_byte_offset=next_byte_offset, next_line_num=line_num,
-                lines=[], total_size=total_size, size_warning=size_warning,
+                command_id=command_id,
+                status=status,
+                next_byte_offset=next_byte_offset,
+                next_line_num=line_num,
+                lines=[],
+                total_size=total_size,
+                size_warning=size_warning,
             )
 
         rendered = LogRenderer().render(0, new_text, start_line_num=line_num)
-        lines = [CommandLogLine(num=l.num, content_html=l.content_html) for l in rendered]
+        lines = [
+            CommandLogLine(num=l.num, content_html=l.content_html) for l in rendered
+        ]
 
         return CommandTraceResponse(
-            command_id=command_id, status=status,
+            command_id=command_id,
+            status=status,
             next_byte_offset=next_byte_offset,
             next_line_num=line_num + len(lines),
-            lines=lines, total_size=total_size, size_warning=size_warning,
+            lines=lines,
+            total_size=total_size,
+            size_warning=size_warning,
         )

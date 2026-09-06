@@ -10,7 +10,9 @@ def _arg(name, required=True):
 def _ctx(pipeline, arguments, arg_defs, run_id=None):
     cmd_config = SimpleNamespace(arguments=arg_defs, pipeline=pipeline)
     raw_request = SimpleNamespace(arguments=arguments)
-    return SimpleNamespace(cmd_config=cmd_config, raw_request=raw_request, run_id=run_id)
+    return SimpleNamespace(
+        cmd_config=cmd_config, raw_request=raw_request, run_id=run_id
+    )
 
 
 def test_build_resolves_placeholders():

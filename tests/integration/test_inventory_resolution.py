@@ -1,4 +1,5 @@
 """Integration tests for GET /api/v1/inventory/nodes/{node_name}/bastion-resolution."""
+
 from __future__ import annotations
 
 import pytest
@@ -14,7 +15,6 @@ from app.repositories.inventory_repository import (
 )
 from app.services.inventory_service import InventoryService
 from tests.fixtures.cluster import InMemoryInventoryRepository
-
 
 _NODE_TYPE_MAP = {"baremetal": "type1"}
 
@@ -57,6 +57,7 @@ def resolution_client():
 
 
 # ── Happy path ────────────────────────────────────────────────────────────────
+
 
 def test_resolution_success(resolution_client):
     token = _get_token(resolution_client)
@@ -113,6 +114,7 @@ def test_resolution_with_bastion_type_override(resolution_client):
 
 
 # ── Error cases ───────────────────────────────────────────────────────────────
+
 
 def test_resolution_node_not_found_returns_404(resolution_client):
     token = _get_token(resolution_client)

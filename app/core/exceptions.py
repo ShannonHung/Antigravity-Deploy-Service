@@ -20,10 +20,10 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Base
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class BaseAppException(Exception):
     """Base class for all application-specific exceptions."""
@@ -51,12 +51,14 @@ class BaseAppException(Exception):
         else:
             frame = inspect.currentframe()
             caller = frame.f_back if frame is not None else None
-            if caller is not None and 'self' in caller.f_locals: 
-                src_func = caller.f_locals['self'].__class__.__name__ \
-                    + "." + caller.f_code.co_name
+            if caller is not None and "self" in caller.f_locals:
+                src_func = (
+                    caller.f_locals["self"].__class__.__name__
+                    + "."
+                    + caller.f_code.co_name
+                )
             elif caller is not None:
-                src_func = caller.f_code.co_filename \
-                    + ":" + str(caller.f_lineno)
+                src_func = caller.f_code.co_filename + ":" + str(caller.f_lineno)
             else:
                 src_func = "unknown"
             self.source_function = src_func
@@ -76,6 +78,7 @@ class BaseAppException(Exception):
 # ──────────────────────────────────────────────────────────────────────────────
 # Concrete exceptions
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class AuthException(BaseAppException):
     """Raised when authentication fails (invalid credentials / bad token)."""
@@ -238,9 +241,7 @@ async def app_exception_handler(
     )
 
 
-async def unhandled_exception_handler(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler for unexpected exceptions.
 
     Logs the full traceback but returns a generic message to the client

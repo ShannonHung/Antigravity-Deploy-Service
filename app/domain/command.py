@@ -37,6 +37,48 @@ class HostType(str, Enum):
     HOSTNAME = "hostname"
     CLUSTER = "cluster"
 
+
+class OutputFormat(str, Enum):
+    """How the caller wants a command's `output` returned.
+
+    `raw` (the default) is byte-for-byte the historical response: `output`
+    stays a string and the JSON fields stay null. `json` additionally parses
+    `output` into `output_json` — permitted only for commands whose whitelist
+    entry declares `output_format: "json"`.
+    """
+    RAW = "raw"
+    JSON = "json"
+
+
+class CommandOutputFormat(str, Enum):
+    """The operator's declaration of what a command emits on stdout.
+
+    Part of the command's contract, not the caller's preference: declaring
+    `json` PERMITS `?format=json`, it never triggers parsing on its own.
+    """
+    TEXT = "text"
+    JSON = "json"
+
+
+class OutputJsonError(str, Enum):
+    """Why `output_json` is null even though `?format=json` was requested.
+
+    Each value maps to a different operational response, which is why they are
+    distinct rather than one generic failure:
+
+    - `parse_failed` — the command declared `output_format: "json"` but its
+      stdout is not valid JSON. The remote script broke its own contract; this
+      is logged server-side at ERROR.
+    - `output_unavailable` — the command succeeded, but its stdout was lost
+      during cross-pod orphan-run recovery, which reconstructs the exit code
+      from the control_node marker without the output. Logged at WARNING.
+    - `not_applicable` — the command is not in a success state, so there was
+      never stdout to parse. Not logged.
+    """
+    PARSE_FAILED = "parse_failed"
+    OUTPUT_UNAVAILABLE = "output_unavailable"
+    NOT_APPLICABLE = "not_applicable"
+
 class CommandState(BaseModel):
     command_id: str
     status: CommandStatus
@@ -54,6 +96,12 @@ class CommandState(BaseModel):
     ssh_config: str
     request_id: str
     exec_command: str
+    # Snapshot of the whitelist's stdout contract, captured at launch. Stored on
+    # the state (rather than re-read from the whitelist at poll time) so an
+    # operator editing allow-commands mid-flight cannot retroactively change how
+    # a already-finished command's output is interpreted. Defaulted for states
+    # written by an older pod during a rolling upgrade.
+    output_format: CommandOutputFormat = CommandOutputFormat.TEXT
 
     # control
     killable: bool
@@ -122,6 +170,11 @@ class CommandWhitelistConfig(BaseModel):
     logged: bool = False  # opt-in: tee output to a per-run file + expose viewer
     checks_script_version: bool = False  # opt-in: pre-check the target script version
     min_script_version: Optional[str] = None  # required when checks_script_version is True
+    # Operator's declaration of the command's stdout contract. "json" PERMITS a
+    # caller to ask for ?format=json on the poll endpoint; it never changes the
+    # response on its own. Surfaced by the /command/info endpoints so callers can
+    # discover which commands accept it.
+    output_format: CommandOutputFormat = CommandOutputFormat.TEXT
     pipeline: List[PipelineStep]
     arguments: List[CommandArgumentConfig] = []
 
@@ -197,6 +250,36 @@ class CommandExecutionResponse(BaseModel):
     host_type: Optional[HostType] = None
     resolved_ip: Optional[str] = None
     pgids: List[int] = Field(default_factory=list)
+
+    # ── Parsed output (populated only by GET /execution/{id}?format=json) ──
+    # `output` above always keeps its raw string value; these are purely
+    # additive so a caller that never passes ?format=json sees an unchanged
+    # response. Typed `Any` because the source script may legitimately emit an
+    # object, an array, or a scalar — pretending otherwise would reject valid
+    # payloads.
+    output_json: Optional[Any] = Field(
+        default=None,
+        description=(
+            "The command's stdout parsed as JSON. Populated only when "
+            "?format=json is requested AND the command's whitelist entry "
+            "declares output_format: \"json\" AND parsing succeeded. Null "
+            "otherwise — see output_json_error for why."
+        ),
+    )
+    output_json_error: Optional[OutputJsonError] = Field(
+        default=None,
+        description=(
+            "Why output_json is null despite ?format=json. "
+            "`parse_failed`: the command declared output_format \"json\" but "
+            "its stdout was not valid JSON — the remote script broke its "
+            "contract (logged server-side at ERROR). "
+            "`output_unavailable`: the command succeeded, but its stdout was "
+            "lost during cross-pod orphan-run recovery, which reconstructs the "
+            "exit code from the control_node marker without the output. "
+            "`not_applicable`: the command is not in a success state, so there "
+            "was never stdout to parse."
+        ),
+    )
 
     @classmethod
     def failed(cls, message: str, exit_status: Optional[int] = None, output: Optional[str] = None, command_id: Optional[str] = None) -> "CommandExecutionResponse":
