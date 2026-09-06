@@ -80,7 +80,10 @@ class DeployService:
 
         _logger.info(
             "Duplicate check | ref=%s | target_vars=%s | active=%d | matches=%d",
-            ref, target_vars, len(running), len(duplicates),
+            ref,
+            target_vars,
+            len(running),
+            len(duplicates),
         )
         return RunningPipelinesData(
             has_running=bool(duplicates),
@@ -117,7 +120,9 @@ class DeployService:
         variables = self._build_variables(action, extra_variables)
         _logger.info(
             "Triggering pipeline | action=%s | ref=%s | variables=%s",
-            action, ref, variables,
+            action,
+            ref,
+            variables,
         )
         return await self._repo.trigger(ref=ref, variables=variables)
 
@@ -173,7 +178,9 @@ class DeployService:
         if total_size > settings.GITLAB_TRACE_HARD_CAP_BYTES:
             _logger.warning(
                 "Job trace exceeded hard cap | job=%s | size=%d | cap=%d",
-                job_id, total_size, settings.GITLAB_TRACE_HARD_CAP_BYTES,
+                job_id,
+                total_size,
+                settings.GITLAB_TRACE_HARD_CAP_BYTES,
             )
             return FormattedLogResponse(
                 job_id=job_id,

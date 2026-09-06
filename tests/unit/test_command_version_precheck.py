@@ -23,12 +23,16 @@ class _FakeConn:
 
 def _ctx(checks, whitelist_min, api_min, conn, script="run-ansible.sh"):
     from types import SimpleNamespace
+
     cmd_config = SimpleNamespace(
-        checks_script_version=checks, min_script_version=whitelist_min,
+        checks_script_version=checks,
+        min_script_version=whitelist_min,
     )
     raw_request = SimpleNamespace(min_script_version=api_min)
     return SimpleNamespace(
-        cmd_config=cmd_config, raw_request=raw_request, conn=conn,
+        cmd_config=cmd_config,
+        raw_request=raw_request,
+        conn=conn,
         pipeline_cmds=[[script, "--playbook", "ping.yml"]],
     )
 

@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.dependencies import get_current_user
 from app.domain.models import (
@@ -47,6 +46,7 @@ def _request_id(request: Request) -> str:
 
 # ── GET /api/v1/auth/verify ───────────────────────────────────────────────────
 
+
 @router.get(
     "/verify",
     response_model=ApiResponse[VerifyData],
@@ -63,6 +63,7 @@ async def verify(
 
 
 # ── POST /api/v1/auth/hash-password ──────────────────────────────────────────
+
 
 @router.post(
     "/hash-password",
@@ -84,6 +85,7 @@ async def hash_password_endpoint(
 
 
 # ── GET /api/v1/auth/my-scopes ───────────────────────────────────────────────
+
 
 @router.get(
     "/my-scopes",

@@ -83,6 +83,7 @@ _health_filter = HealthCheckFilter()
 # Middleware
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class RequestIdMiddleware(BaseHTTPMiddleware):
     """Assign a request_id to every incoming request.
 
@@ -118,6 +119,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
 # Setup helper
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def setup_logging(log_level: str = "INFO") -> None:
     """Configure root logger with request_id in the format string."""
     level = getattr(logging, log_level.upper(), logging.INFO)
@@ -127,9 +129,9 @@ def setup_logging(log_level: str = "INFO") -> None:
     handler.setFormatter(
         logging.Formatter(
             fmt="%(asctime)s | %(levelname)-8s | req=%(request_id)s | "
-                "user=%(username)s | cmd=%(command_id)s | "
-                "target=%(host)s:%(port)s | "
-                "%(name)s:%(lineno)d | %(message)s",
+            "user=%(username)s | cmd=%(command_id)s | "
+            "target=%(host)s:%(port)s | "
+            "%(name)s:%(lineno)d | %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S",
         )
     )

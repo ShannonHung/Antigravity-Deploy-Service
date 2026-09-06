@@ -17,7 +17,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Depends, Form, Response
+from fastapi import FastAPI, Depends, Form, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -49,8 +49,9 @@ _logger = logging.getLogger(__name__)
 # Lifespan
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan manager.
 
     Startup:  configure logging, validate config.
@@ -68,18 +69,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield  # ← application runs here
 
-    _logger.info(
-        "Shutting down %s — goodbye.", settings.APP_NAME
-    )
-    
+    _logger.info("Shutting down %s — goodbye.", settings.APP_NAME)
+
     from app.core.redis_client import RedisClient
     from app.repositories.command_state_repository import CommandStateRepository
+
     try:
         redis = await RedisClient.get_client()
         repo = CommandStateRepository(redis)
         svc = CommandService(repo)
         await svc.shutdown_gracefully()
-    except Exception as e:
+    # Shutdown must never raise: a failure here would abort the lifespan teardown and leave Redis unclosed.
+    except Exception as e:  # pylint: disable=broad-exception-caught
         _logger.error(f"Error during graceful shutdown: {e}")
 
     await RedisClient.close()
@@ -89,10 +90,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # App factory
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def create_app() -> FastAPI:
     settings = get_settings()
 
-    app = FastAPI(
+    # Shadows the module-level `app = create_app()` below; that is the
+    # app-factory pattern, and renaming either would be worse.
+    app = FastAPI(  # pylint: disable=redefined-outer-name
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
         debug=settings.DEBUG,
@@ -108,7 +112,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIdMiddleware)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],   # Tighten per environment as needed
+        allow_origins=["*"],  # Tighten per environment as needed
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -124,6 +128,7 @@ def create_app() -> FastAPI:
 
     # ── Offline Documentation ──────────────────────────────────────────────────
     if settings.DEBUG:
+
         @app.get("/docs", include_in_schema=False)
         async def custom_swagger_ui_html():
             return get_swagger_ui_html(
@@ -177,9 +182,15 @@ def create_app() -> FastAPI:
     # Browser-first login: a real same-origin form whose POST sets the cookie
     # and redirects to `next`. This is what makes the HTML log viewer usable by
     # just opening a URL (Swagger's XHR /token cannot persist the cookie).
-    @app.get("/login", response_class=HTMLResponse, tags=["auth"], summary="Login page (browser)")
-    async def login_page(next: str = "/docs", error: str = ""):
-        safe_next = html.escape(safe_next_path(next), quote=True)
+    @app.get(
+        "/login",
+        response_class=HTMLResponse,
+        tags=["auth"],
+        summary="Login page (browser)",
+    )
+    # `next` is the query key; aliased so the builtin is not shadowed.
+    async def login_page(next_url: str = Query("/docs", alias="next"), error: str = ""):
+        safe_next = html.escape(safe_next_path(next_url), quote=True)
         error_html = f'<div class="error">{html.escape(error)}</div>' if error else ""
         return LOGIN_HTML.format(next=safe_next, error=error_html)
 
@@ -187,9 +198,9 @@ def create_app() -> FastAPI:
     async def login_submit(
         response: Response,
         form_data: OAuth2PasswordRequestForm = Depends(),
-        next: str = Form("/docs"),
+        next_url: str = Form("/docs", alias="next"),
     ):
-        target = safe_next_path(next)
+        target = safe_next_path(next_url)
         svc = AuthService(JsonUserRepository(settings.USERS_JSON_PATH))
         try:
             user = await svc.authenticate(form_data.username, form_data.password)

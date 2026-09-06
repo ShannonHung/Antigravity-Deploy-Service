@@ -7,6 +7,7 @@ GET /api/v1/inventory/cluster/bastion-resolution  → ClusterBastionResolution
 
 All endpoints require command_api scope.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, List, Optional
@@ -57,11 +58,13 @@ async def get_node(
 )
 async def get_mappings(
     request: Request,
-    type: str = Query(..., description="Bastion type name"),
+    # Exposed as `?type=` via alias; `type_name` in Python so the builtin is
+    # not shadowed inside the handler.
+    type_name: str = Query(..., alias="type", description="Bastion type name"),
     current_user: Annotated[User, Depends(get_current_user(["command_api"]))] = None,
     repo: InventoryRepository = Depends(get_inventory_repository),
 ) -> ApiResponse[List[BastionMapping]]:
-    data = await repo.list_mappings(type)
+    data = await repo.list_mappings(type_name)
     return ApiResponse(data=data, request_id=_request_id(request))
 
 
@@ -73,11 +76,16 @@ async def get_mappings(
 async def get_node_bastion_resolution(
     request: Request,
     node_name: str,
-    bastion_type: Optional[str] = Query(default=None, description="Override bastion type (default: derived from node_type via BASTION_NODE_TYPE_MAP config)"),
+    bastion_type: Optional[str] = Query(
+        default=None,
+        description="Override bastion type (default: derived from node_type via BASTION_NODE_TYPE_MAP config)",
+    ),
     current_user: Annotated[User, Depends(get_current_user(["command_api"]))] = None,
     service: InventoryService = Depends(get_inventory_service),
 ) -> ApiResponse[NodeBastionResolution]:
-    data = await service.resolve_node_bastion(node_name, bastion_type_override=bastion_type)
+    data = await service.resolve_node_bastion(
+        node_name, bastion_type_override=bastion_type
+    )
     return ApiResponse(data=data, request_id=_request_id(request))
 
 
@@ -88,7 +96,9 @@ async def get_node_bastion_resolution(
 )
 async def get_cluster_bastion_resolution(
     request: Request,
-    cluster_name: str = Query(..., description="Cluster name; a '/' selects the with_slash bastion_type"),
+    cluster_name: str = Query(
+        ..., description="Cluster name; a '/' selects the with_slash bastion_type"
+    ),
     current_user: Annotated[User, Depends(get_current_user(["command_api"]))] = None,
     service: InventoryService = Depends(get_inventory_service),
 ) -> ApiResponse[ClusterBastionResolution]:

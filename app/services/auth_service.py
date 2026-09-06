@@ -46,10 +46,10 @@ class AuthService:
             AuthException: If the account does not exist or the password is wrong.
         """
         user_in_db = await self._repo.get_by_account(account)
-        if user_in_db is None or not verify_password(password, user_in_db.hashed_password):
-            _logger.warning(
-                "Authentication failed | account=%s", account
-            )
+        if user_in_db is None or not verify_password(
+            password, user_in_db.hashed_password
+        ):
+            _logger.warning("Authentication failed | account=%s", account)
             raise AuthException(
                 "Invalid account or password.",
             )
@@ -72,9 +72,7 @@ class AuthService:
             data={"sub": user.account, "scopes": user.scopes},
             expires_delta=expires_delta,
         )
-        _logger.info(
-            "Token issued | account=%s | scopes=%s", user.account, user.scopes
-        )
+        _logger.info("Token issued | account=%s | scopes=%s", user.account, user.scopes)
         return TokenData(
             access_token=token,
             token_type="bearer",

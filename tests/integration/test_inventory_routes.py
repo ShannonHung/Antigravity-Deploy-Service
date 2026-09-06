@@ -1,4 +1,5 @@
 """Integration tests for /api/v1/inventory/ endpoints."""
+
 from __future__ import annotations
 
 import pytest
@@ -50,6 +51,7 @@ def inventory_client():
 
 # ── GET /api/v1/inventory/nodes/{node_name} ───────────────────────────────────
 
+
 def test_lookup_by_name_success(inventory_client):
     token = _get_token(inventory_client)
     resp = inventory_client.get(
@@ -83,7 +85,9 @@ def test_lookup_by_name_wrong_scope_returns_403(inventory_client):
         "/token",
         data={"username": "test_deployer", "password": "secret"},
     )
-    assert resp.status_code == 200, "test_deployer must be configured in tests/fixtures/users.json"
+    assert (
+        resp.status_code == 200
+    ), "test_deployer must be configured in tests/fixtures/users.json"
     token = resp.json()["access_token"]
     resp = inventory_client.get(
         "/api/v1/inventory/nodes/node1",
@@ -93,6 +97,7 @@ def test_lookup_by_name_wrong_scope_returns_403(inventory_client):
 
 
 # ── GET /api/v1/inventory/mappings ────────────────────────────────────────────
+
 
 def test_list_mappings_success(inventory_client):
     token = _get_token(inventory_client)

@@ -41,7 +41,10 @@ async def test_list_success_returns_mappings_in_order():
                             {
                                 "runner": "r1",
                                 "bastion": "b1",
-                                "patterns": ["type1-cluster-(c1|c2)", "type1-cluster.*"],
+                                "patterns": [
+                                    "type1-cluster-(c1|c2)",
+                                    "type1-cluster.*",
+                                ],
                                 "bastion_ip": "10.0.0.1",
                             },
                             {
@@ -82,23 +85,33 @@ async def test_list_empty_results_raises_not_found():
 
 async def test_list_multiple_results_raises_upstream_unavailable():
     """results with more than one item violates API contract."""
-    repo = _repo(lambda r: httpx.Response(200, json={
-        "count": 2,
-        "results": [
-            {"id": "1", "name": "type1", "data": []},
-            {"id": "2", "name": "type1", "data": []},
-        ],
-    }))
+    repo = _repo(
+        lambda r: httpx.Response(
+            200,
+            json={
+                "count": 2,
+                "results": [
+                    {"id": "1", "name": "type1", "data": []},
+                    {"id": "2", "name": "type1", "data": []},
+                ],
+            },
+        )
+    )
     with pytest.raises(UpstreamUnavailableException):
         await repo.list_mappings("type1")
 
 
 async def test_list_missing_data_field_raises_upstream_unavailable():
     """Single result but no 'data' key is a contract violation."""
-    repo = _repo(lambda r: httpx.Response(200, json={
-        "count": 1,
-        "results": [{"id": "1", "name": "type1"}],
-    }))
+    repo = _repo(
+        lambda r: httpx.Response(
+            200,
+            json={
+                "count": 1,
+                "results": [{"id": "1", "name": "type1"}],
+            },
+        )
+    )
     with pytest.raises(UpstreamUnavailableException):
         await repo.list_mappings("type1")
 

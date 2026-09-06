@@ -5,6 +5,7 @@ accept the JWT from an HttpOnly cookie that /token sets on login.
 This mirrors the user's requirement: log in once (via Swagger's /token), then
 the viewer works in the browser; without logging in, /trace/ui stays 401.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -21,14 +22,18 @@ class _EmptyCommandStateRepo:
 @pytest.fixture
 def trace_client():
     app = create_app()
-    app.dependency_overrides[get_command_state_repository] = lambda: _EmptyCommandStateRepo()
+    app.dependency_overrides[get_command_state_repository] = (
+        lambda: _EmptyCommandStateRepo()
+    )
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
 
 
 def test_token_sets_access_token_cookie(trace_client):
-    r = trace_client.post("/token", data={"username": "test_admin", "password": "secret"})
+    r = trace_client.post(
+        "/token", data={"username": "test_admin", "password": "secret"}
+    )
     assert r.status_code == 200, r.text
     # /token must set an access_token cookie so the browser viewer is authed.
     assert "access_token" in r.cookies
@@ -36,7 +41,9 @@ def test_token_sets_access_token_cookie(trace_client):
 
 def test_trace_ui_accepts_cookie_token(trace_client):
     # Log in -> cookie is stored on the client's cookie jar.
-    r = trace_client.post("/token", data={"username": "test_admin", "password": "secret"})
+    r = trace_client.post(
+        "/token", data={"username": "test_admin", "password": "secret"}
+    )
     assert r.status_code == 200, r.text
     # No Authorization header here; the browser only has the cookie.
     r2 = trace_client.get("/api/v1/command/execution/does-not-exist/trace/ui")

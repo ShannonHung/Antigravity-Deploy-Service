@@ -9,9 +9,20 @@ SCRIPT = Path(__file__).resolve().parents[2] / "ansible" / "run-ansible.sh"
 
 def _run(tmp_path, *extra):
     return subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path), *extra],
-        capture_output=True, text=True,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
         env={**os.environ, "DRYRUN": "1"},
     )
 
@@ -68,6 +79,7 @@ def test_retention_zero_disables_cleanup(tmp_path):
 #   * a sidecar  <log-dir>/<run-id>.exit   (machine-parsed by deploy-service)
 #   * a final log line  "=== EXIT <code> ===" (human-visible in /view)
 
+
 def _run_with_fake_docker(tmp_path, exit_code, *extra):
     """Run the script for real (no DRYRUN) but with fake git+docker on PATH so
     no network/daemon is touched. The fake docker exits with `exit_code` and
@@ -84,9 +96,7 @@ def _run_with_fake_docker(tmp_path, exit_code, *extra):
     )
     # Fake docker: print a marker line then exit with the requested code.
     (bindir / "docker").write_text(
-        "#!/usr/bin/env bash\n"
-        'echo "FAKE ANSIBLE OUTPUT"\n'
-        f"exit {exit_code}\n"
+        "#!/usr/bin/env bash\n" 'echo "FAKE ANSIBLE OUTPUT"\n' f"exit {exit_code}\n"
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
@@ -98,9 +108,21 @@ def _run_with_fake_docker(tmp_path, exit_code, *extra):
         "SKIP_SSH_KEY_CHECK": "1",
     }
     return subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path), *extra],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -145,19 +167,32 @@ def _run_with_failing_git(tmp_path, *extra):
         "exit 128\n"
     )
     (bindir / "docker").write_text(
-        "#!/usr/bin/env bash\n"
-        f'touch "{tmp_path}/docker_was_called"\n'
-        "exit 0\n"
+        "#!/usr/bin/env bash\n" f'touch "{tmp_path}/docker_was_called"\n' "exit 0\n"
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
-           "SKIP_SSH_KEY_CHECK": "1"}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SKIP_SSH_KEY_CHECK": "1",
+    }
     env.pop("INVENTORY_REPO", None)
     return subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path), *extra],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -194,6 +229,7 @@ def test_image_tag_sets_image(tmp_path):
     assert res.returncode == 0, res.stderr
     assert "shannonhung/ansible-runner:v1.2" in res.stdout
 
+
 def test_image_and_image_tag_mutually_exclusive(tmp_path):
     res = _run(tmp_path, "--image", "foo/bar:1", "--image-tag", "v1.2")
     assert res.returncode == 2
@@ -212,18 +248,31 @@ def _run_with_failing_docker(tmp_path, *extra):
         'printf "[all]\\nnode1\\n" > "$dest/taipei/multinode.ini"\n'
     )
     (bindir / "docker").write_text(
-        "#!/usr/bin/env bash\n"
-        f'touch "{tmp_path}/docker_was_called"\n'
-        "exit 99\n"
+        "#!/usr/bin/env bash\n" f'touch "{tmp_path}/docker_was_called"\n' "exit 99\n"
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
-           "SKIP_SSH_KEY_CHECK": "1"}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SKIP_SSH_KEY_CHECK": "1",
+    }
     return subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path), *extra],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
 
@@ -231,9 +280,9 @@ def test_dry_run_prints_but_does_not_run_docker(tmp_path):
     res = _run_with_failing_docker(tmp_path, "--dry-run", "--run-id", "dr1")
     assert res.returncode == 0, res.stderr
     assert "RUN SUMMARY" in res.stdout
-    assert "docker run" in res.stdout            # printed as text
+    assert "docker run" in res.stdout  # printed as text
     assert not (tmp_path / "docker_was_called").exists()  # never executed
-    assert not (tmp_path / "dr1.exit").exists()   # nothing ran → no sidecar
+    assert not (tmp_path / "dr1.exit").exists()  # nothing ran → no sidecar
 
 
 def test_debug_starts_idle_container_and_keeps_clone(tmp_path):
@@ -247,21 +296,35 @@ def test_debug_starts_idle_container_and_keeps_clone(tmp_path):
         'printf "[all]\\nnode1\\n" > "$dest/taipei/multinode.ini"\n'
     )
     (bindir / "docker").write_text(
-        "#!/usr/bin/env bash\n"
-        f'echo "$@" >> "{tmp_path}/docker_argv"\n'
-        "exit 0\n"
+        "#!/usr/bin/env bash\n" f'echo "$@" >> "{tmp_path}/docker_argv"\n' "exit 0\n"
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
-           "SKIP_SSH_KEY_CHECK": "1",
-           # Keep the clone dir beside a known, inspectable parent.
-           "CLONE_PARENT": str(tmp_path / "clones")}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SKIP_SSH_KEY_CHECK": "1",
+        # Keep the clone dir beside a known, inspectable parent.
+        "CLONE_PARENT": str(tmp_path / "clones"),
+    }
     res = subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path),
-         "--debug", "--run-id", "dbg1"],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            "--debug",
+            "--run-id",
+            "dbg1",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert res.returncode == 0, res.stderr
     argv = (tmp_path / "docker_argv").read_text()
@@ -285,22 +348,33 @@ def test_debug_without_playbook_inventory_starts_bare_container(tmp_path):
     bindir.mkdir()
     # git must NOT be called (nothing to clone); record if it ever is.
     (bindir / "git").write_text(
-        "#!/usr/bin/env bash\n"
-        f'touch "{tmp_path}/git_was_called"\n'
+        "#!/usr/bin/env bash\n" f'touch "{tmp_path}/git_was_called"\n'
     )
     (bindir / "docker").write_text(
-        "#!/usr/bin/env bash\n"
-        f'echo "$@" >> "{tmp_path}/docker_argv"\n'
-        "exit 0\n"
+        "#!/usr/bin/env bash\n" f'echo "$@" >> "{tmp_path}/docker_argv"\n' "exit 0\n"
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
-           "SKIP_SSH_KEY_CHECK": "1", "CLONE_PARENT": str(tmp_path / "clones")}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SKIP_SSH_KEY_CHECK": "1",
+        "CLONE_PARENT": str(tmp_path / "clones"),
+    }
     res = subprocess.run(
-        ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path),
-         "--debug", "--run-id", "bare1"],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            "--debug",
+            "--run-id",
+            "bare1",
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert res.returncode == 0, res.stderr
     assert not (tmp_path / "git_was_called").exists(), "no inventory → git must not run"
@@ -317,9 +391,18 @@ def test_debug_requires_both_or_neither(tmp_path):
     # Only one of the pair in debug mode is a mistake → rejected. Pass just
     # --inventory (no --playbook) to exercise the guard.
     res = subprocess.run(
-        ["bash", str(SCRIPT), "--inventory", "taipei/multinode.ini",
-         "--no-pull", "--log-dir", str(tmp_path), "--debug"],
-        capture_output=True, text=True,
+        [
+            "bash",
+            str(SCRIPT),
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            "--debug",
+        ],
+        capture_output=True,
+        text=True,
         env={**os.environ, "DRYRUN": "1", "SKIP_SSH_KEY_CHECK": "1"},
     )
     assert res.returncode == 2
@@ -329,7 +412,9 @@ def test_debug_requires_both_or_neither(tmp_path):
 def test_non_debug_still_requires_playbook_inventory(tmp_path):
     res = subprocess.run(
         ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path)],
-        capture_output=True, text=True, env={**os.environ, "DRYRUN": "1"},
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DRYRUN": "1"},
     )
     assert res.returncode == 2
     assert "required" in (res.stderr + res.stdout).lower()
@@ -356,13 +441,29 @@ def test_debug_container_has_vault_env_preset(tmp_path):
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
-           "SKIP_SSH_KEY_CHECK": "1", "VAULT_PASS_FILE": str(vault_file),
-           "CLONE_PARENT": str(tmp_path / "clones")}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SKIP_SSH_KEY_CHECK": "1",
+        "VAULT_PASS_FILE": str(vault_file),
+        "CLONE_PARENT": str(tmp_path / "clones"),
+    }
     res = subprocess.run(
-        ["bash", str(SCRIPT), "--no-pull", "--log-dir", str(tmp_path),
-         "--debug", "--run-id", "dbgvault", "--secret-path", str(sec)],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            "--debug",
+            "--run-id",
+            "dbgvault",
+            "--secret-path",
+            str(sec),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert res.returncode == 0, res.stderr
     assert vault_file.exists() and vault_file.read_text() == vault
@@ -399,9 +500,7 @@ def test_debug_fails_fast_on_missing_ssh_key(tmp_path):
     )
     # Fake docker: records whether it was ever called.
     (bindir / "docker").write_text(
-        "#!/usr/bin/env bash\n"
-        f'touch "{tmp_path}/docker_was_called"\n'
-        "exit 0\n"
+        "#!/usr/bin/env bash\n" f'touch "{tmp_path}/docker_was_called"\n' "exit 0\n"
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
@@ -409,11 +508,23 @@ def test_debug_fails_fast_on_missing_ssh_key(tmp_path):
     # No SKIP_SSH_KEY_CHECK; point --ssh-key at a path that definitely doesn't exist.
     env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"}
     res = subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--debug",
-         "--ssh-key", "/nonexistent/key",
-         "--log-dir", str(tmp_path)],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--debug",
+            "--ssh-key",
+            "/nonexistent/key",
+            "--log-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
 
     assert res.returncode == 2, (
@@ -421,13 +532,13 @@ def test_debug_fails_fast_on_missing_ssh_key(tmp_path):
         f"stdout: {res.stdout}\nstderr: {res.stderr}"
     )
     combined = res.stderr + res.stdout
-    assert "ssh key not found" in combined.lower(), (
-        f"Expected 'ssh key not found' in output. Got:\n{combined}"
-    )
+    assert (
+        "ssh key not found" in combined.lower()
+    ), f"Expected 'ssh key not found' in output. Got:\n{combined}"
     # The container must NOT have been started.
-    assert not (tmp_path / "docker_was_called").exists(), (
-        "docker must not be called when the SSH key is missing in debug mode"
-    )
+    assert not (
+        tmp_path / "docker_was_called"
+    ).exists(), "docker must not be called when the SSH key is missing in debug mode"
 
 
 # ── Inventory repo selection + token auth ────────────────────────────────────
@@ -438,6 +549,7 @@ def test_debug_fails_fast_on_missing_ssh_key(tmp_path):
 # That lets us assert the resolved URL, prove the token never appears in
 # argv/URL/output, and confirm it rides in only via the env-config header. The
 # fake docker exits 0 so the run completes; we only care about the clone step.
+
 
 def _run_with_recording_git(tmp_path, *extra, env_extra=None):
     """Fake git that records clone URL + argv + GIT_ASKPASS + the injected
@@ -464,8 +576,11 @@ def _run_with_recording_git(tmp_path, *extra, env_extra=None):
     (bindir / "docker").write_text("#!/usr/bin/env bash\nexit 0\n")
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
-           "SKIP_SSH_KEY_CHECK": "1"}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SKIP_SSH_KEY_CHECK": "1",
+    }
     # The recording git ignores --branch, so unset INVENTORY_REPO to exercise the
     # repo-name → URL builder (otherwise the inherited env could override it).
     env.pop("INVENTORY_REPO", None)
@@ -476,9 +591,21 @@ def _run_with_recording_git(tmp_path, *extra, env_extra=None):
     if env_extra:
         env.update(env_extra)
     res = subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path), *extra],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     return res
 
@@ -491,8 +618,9 @@ def test_default_inventory_repo_name(tmp_path):
 
 
 def test_inventory_repo_name_selects_repo(tmp_path):
-    res = _run_with_recording_git(tmp_path, "--inventory-repo-name",
-                                  "ansible-inventory-v2")
+    res = _run_with_recording_git(
+        tmp_path, "--inventory-repo-name", "ansible-inventory-v2"
+    )
     assert res.returncode == 0, res.stderr
     url = (tmp_path / "git_url").read_text()
     assert "gitlab.com/ShannonHung/ansible-inventory-v2.git" in url
@@ -501,8 +629,11 @@ def test_inventory_repo_name_selects_repo(tmp_path):
 
 def test_inventory_repo_env_still_overrides(tmp_path):
     res = _run_with_recording_git(
-        tmp_path, "--inventory-repo-name", "ansible-inventory-v1",
-        env_extra={"INVENTORY_REPO": "https://example.com/custom/repo.git"})
+        tmp_path,
+        "--inventory-repo-name",
+        "ansible-inventory-v1",
+        env_extra={"INVENTORY_REPO": "https://example.com/custom/repo.git"},
+    )
     assert res.returncode == 0, res.stderr
     url = (tmp_path / "git_url").read_text()
     assert "example.com/custom/repo.git" in url
@@ -532,9 +663,9 @@ def _decode_header_token(tmp_path):
     """Decode the base64 in the recorded `Authorization: Basic ...` header."""
     raw = (tmp_path / "git_header").read_text().strip()
     # Format recorded by the fake git: HEADER=[Authorization: Basic <b64>]
-    inner = raw[len("HEADER=["):-1] if raw.startswith("HEADER=[") else raw
+    inner = raw[len("HEADER=[") : -1] if raw.startswith("HEADER=[") else raw
     assert inner.startswith("Authorization: Basic "), raw
-    b64 = inner[len("Authorization: Basic "):]
+    b64 = inner[len("Authorization: Basic ") :]
     return base64.b64decode(b64).decode()
 
 
@@ -550,9 +681,12 @@ def test_token_from_env_uses_config_header_and_does_not_leak(tmp_path):
     url = (tmp_path / "git_url").read_text()
     assert secret not in argv, "token must never appear in git argv"
     assert secret not in url, "token must never appear in the clone URL"
-    assert "@" not in url, "clone URL must stay credential-free (nothing in .git/config)"
-    assert secret not in res.stdout and secret not in res.stderr, \
-        "token must never be printed"
+    assert (
+        "@" not in url
+    ), "clone URL must stay credential-free (nothing in .git/config)"
+    assert (
+        secret not in res.stdout and secret not in res.stderr
+    ), "token must never be printed"
     # The token reaches git ONLY via the env-injected Basic auth header.
     assert _decode_header_token(tmp_path) == f"oauth2:{secret}"
     assert "Auth           : token (env)" in res.stdout
@@ -636,14 +770,32 @@ def test_vault_file_autogenerated_mounted_and_env_preset(tmp_path):
     )
     for f in ("git", "docker"):
         os.chmod(bindir / f, 0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
-           "SKIP_SSH_KEY_CHECK": "1", "VAULT_PASS_FILE": str(vault_file)}
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SKIP_SSH_KEY_CHECK": "1",
+        "VAULT_PASS_FILE": str(vault_file),
+    }
     env.pop("INVENTORY_REPO", None)
     res = subprocess.run(
-        ["bash", str(SCRIPT), "--playbook", "ping.yml", "--inventory",
-         "taipei/multinode.ini", "--no-pull", "--log-dir", str(tmp_path),
-         "--run-id", "vault1", "--secret-path", str(sec)],
-        capture_output=True, text=True, env=env,
+        [
+            "bash",
+            str(SCRIPT),
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            "taipei/multinode.ini",
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            "--run-id",
+            "vault1",
+            "--secret-path",
+            str(sec),
+        ],
+        capture_output=True,
+        text=True,
+        env=env,
     )
     assert res.returncode == 0, res.stderr
 
@@ -666,7 +818,9 @@ def test_vault_file_autogenerated_mounted_and_env_preset(tmp_path):
 def test_version_flag_prints_and_exits_zero(tmp_path):
     res = subprocess.run(
         ["bash", str(SCRIPT), "--version"],
-        capture_output=True, text=True, env={**os.environ},
+        capture_output=True,
+        text=True,
+        env={**os.environ},
     )
     assert res.returncode == 0, res.stderr
     assert res.stdout.strip().startswith("run-ansible.sh ")
@@ -698,6 +852,7 @@ def test_min_version_malformed_rejected(tmp_path):
 # the sidecar, _heal_from_marker keeps the run RUNNING until the Redis TTL
 # expires — the exact bug the failure-observability work exists to kill.
 
+
 def _run_mode(tmp_path, inventory, run_id):
     """Run in --dry-run MODE (not DRYRUN=1, which exits before the clone and
     before the marker trap is armed). Needs the fake git on PATH to clone."""
@@ -713,10 +868,22 @@ def _run_mode(tmp_path, inventory, run_id):
     )
     os.chmod(bindir / "git", 0o755)
     return subprocess.run(
-        ["bash", str(SCRIPT), "--dry-run", "--playbook", "ping.yml",
-         "--inventory", inventory, "--no-pull", "--log-dir", str(tmp_path),
-         "--run-id", run_id],
-        capture_output=True, text=True,
+        [
+            "bash",
+            str(SCRIPT),
+            "--dry-run",
+            "--playbook",
+            "ping.yml",
+            "--inventory",
+            inventory,
+            "--no-pull",
+            "--log-dir",
+            str(tmp_path),
+            "--run-id",
+            run_id,
+        ],
+        capture_output=True,
+        text=True,
         env={**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}"},
     )
 

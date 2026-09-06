@@ -58,9 +58,9 @@ async def test_duplicate_detected_different_user():
         extra_variables=[PipelineVariable(key=_TRIGGER_FROM, value="bob")],
     )
 
-    assert result.has_running is True, (
-        "Different TRIGGER_FROM values must NOT prevent duplicate detection"
-    )
+    assert (
+        result.has_running is True
+    ), "Different TRIGGER_FROM values must NOT prevent duplicate detection"
 
 
 async def test_no_duplicate_different_action():

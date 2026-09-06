@@ -3,6 +3,7 @@
 Used to backfill the API `output` on a failed `logged` command, whose SSH
 channel is empty by design (output redirected to /dev/null on the target).
 """
+
 from unittest.mock import AsyncMock, MagicMock
 
 from app.domain.command import CommandState, CommandStatus
@@ -12,10 +13,17 @@ from app.core.exceptions import UpstreamUnavailableException
 
 def _state(**over):
     base = dict(
-        command_id="c1", status=CommandStatus.RUNNING, host="h",
-        resolved_ip="1.2.3.4", port=2224, username="root",
-        ssh_config="control_node", request_id="r1", exec_command="x",
-        killable=True, run_log_path="/var/log/deploy-service/c1.log",
+        command_id="c1",
+        status=CommandStatus.RUNNING,
+        host="h",
+        resolved_ip="1.2.3.4",
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        request_id="r1",
+        exec_command="x",
+        killable=True,
+        run_log_path="/var/log/deploy-service/c1.log",
     )
     base.update(over)
     return CommandState(**base)
@@ -69,7 +77,8 @@ async def test_read_log_tail_none_when_no_log_path():
 async def test_read_log_tail_swallows_ssh_failure(monkeypatch):
     ssh = SshSupport()
     monkeypatch.setattr(
-        ssh, "_connect_to_control_node",
+        ssh,
+        "_connect_to_control_node",
         AsyncMock(side_effect=UpstreamUnavailableException("down")),
     )
     assert await ssh._read_log_tail(_state(), 50) is None

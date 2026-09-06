@@ -1,10 +1,16 @@
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 import asyncio
 import re
+from dataclasses import dataclass, field
 from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
+
 import asyncssh
 from pydantic import BaseModel, Field, model_validator
+
+if TYPE_CHECKING:
+    # Imported for type checking only: a runtime import would create a cycle
+    # (host_resolver imports this module's domain models).
+    from app.repositories.host_resolver import ResolvedHost
 
 
 def _compile_config_regex(pattern: str, field_label: str) -> "re.Pattern[str]":
@@ -17,12 +23,11 @@ def _compile_config_regex(pattern: str, field_label: str) -> "re.Pattern[str]":
     try:
         return re.compile(pattern)
     except re.error as exc:
-        raise ValueError(
-            f"{field_label}: invalid regex {pattern!r} ({exc})"
-        ) from exc
+        raise ValueError(f"{field_label}: invalid regex {pattern!r} ({exc})") from exc
 
 
 # ── State Machine Domain Models ──────────────────────────────────────────────
+
 
 class CommandStatus(str, Enum):
     RUNNING = "running"
@@ -31,11 +36,58 @@ class CommandStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
 
+
 class HostType(str, Enum):
     IP = "ip"
     BASTION = "bastion"
     HOSTNAME = "hostname"
     CLUSTER = "cluster"
+
+
+class OutputFormat(str, Enum):
+    """How the caller wants a command's `output` returned.
+
+    `raw` (the default) is byte-for-byte the historical response: `output`
+    stays a string and the JSON fields stay null. `json` additionally parses
+    `output` into `output_json` — permitted only for commands whose whitelist
+    entry declares `output_format: "json"`.
+    """
+
+    RAW = "raw"
+    JSON = "json"
+
+
+class CommandOutputFormat(str, Enum):
+    """The operator's declaration of what a command emits on stdout.
+
+    Part of the command's contract, not the caller's preference: declaring
+    `json` PERMITS `?format=json`, it never triggers parsing on its own.
+    """
+
+    TEXT = "text"
+    JSON = "json"
+
+
+class OutputJsonError(str, Enum):
+    """Why `output_json` is null even though `?format=json` was requested.
+
+    Each value maps to a different operational response, which is why they are
+    distinct rather than one generic failure:
+
+    - `parse_failed` — the command declared `output_format: "json"` but its
+      stdout is not valid JSON. The remote script broke its own contract; this
+      is logged server-side at ERROR.
+    - `output_unavailable` — the command succeeded, but its stdout was lost
+      during cross-pod orphan-run recovery, which reconstructs the exit code
+      from the control_node marker without the output. Logged at WARNING.
+    - `not_applicable` — the command is not in a success state, so there was
+      never stdout to parse. Not logged.
+    """
+
+    PARSE_FAILED = "parse_failed"
+    OUTPUT_UNAVAILABLE = "output_unavailable"
+    NOT_APPLICABLE = "not_applicable"
+
 
 class CommandState(BaseModel):
     command_id: str
@@ -54,6 +106,12 @@ class CommandState(BaseModel):
     ssh_config: str
     request_id: str
     exec_command: str
+    # Snapshot of the whitelist's stdout contract, captured at launch. Stored on
+    # the state (rather than re-read from the whitelist at poll time) so an
+    # operator editing allow-commands mid-flight cannot retroactively change how
+    # a already-finished command's output is interpreted. Defaulted for states
+    # written by an older pod during a rolling upgrade.
+    output_format: CommandOutputFormat = CommandOutputFormat.TEXT
 
     # control
     killable: bool
@@ -72,7 +130,12 @@ class CommandState(BaseModel):
         self.exit_code = exit_code
         self.output = output
 
-    def mark_failed(self, message: str, exit_code: Optional[int] = None, output: Optional[str] = None):
+    def mark_failed(
+        self,
+        message: str,
+        exit_code: Optional[int] = None,
+        output: Optional[str] = None,
+    ):
         self.status = CommandStatus.FAILED
         self.message = message
         # Keep exit_code/output when the failure came from a finished process
@@ -95,12 +158,13 @@ class CommandState(BaseModel):
 
 # ── Whitelist Configuration ──────────────────────────────────────────────────
 
+
 class CommandArgumentConfig(BaseModel):
     name: str
     type: str  # e.g., "int", "string"
     validation_regex: str = ""
     required: bool = True  # when False, the arg may be omitted from the request
-                           # and any pipeline tokens referencing it are dropped.
+    # and any pipeline tokens referencing it are dropped.
 
     @model_validator(mode="after")
     def _validate_regex(self) -> "CommandArgumentConfig":
@@ -111,8 +175,10 @@ class CommandArgumentConfig(BaseModel):
             )
         return self
 
+
 class PipelineStep(BaseModel):
     command: List[str]
+
 
 class CommandWhitelistConfig(BaseModel):
     command_name: str
@@ -121,7 +187,14 @@ class CommandWhitelistConfig(BaseModel):
     killable: bool = False
     logged: bool = False  # opt-in: tee output to a per-run file + expose viewer
     checks_script_version: bool = False  # opt-in: pre-check the target script version
-    min_script_version: Optional[str] = None  # required when checks_script_version is True
+    min_script_version: Optional[str] = (
+        None  # required when checks_script_version is True
+    )
+    # Operator's declaration of the command's stdout contract. "json" PERMITS a
+    # caller to ask for ?format=json on the poll endpoint; it never changes the
+    # response on its own. Surfaced by the /command/info endpoints so callers can
+    # discover which commands accept it.
+    output_format: CommandOutputFormat = CommandOutputFormat.TEXT
     pipeline: List[PipelineStep]
     arguments: List[CommandArgumentConfig] = []
 
@@ -130,6 +203,7 @@ class CommandWhitelistConfig(BaseModel):
         # A forgotten baseline must fail loudly at load, not silently no-op.
         if self.checks_script_version:
             from app.core.version import parse_semver
+
             if not self.min_script_version:
                 raise ValueError(
                     f"command '{self.command_name}': checks_script_version=true "
@@ -137,6 +211,40 @@ class CommandWhitelistConfig(BaseModel):
                 )
             parse_semver(self.min_script_version)  # raises ValueError if malformed
         return self
+
+    @model_validator(mode="after")
+    def _validate_output_format(self) -> "CommandWhitelistConfig":
+        """Reject output_format combinations that can never yield parseable stdout.
+
+        Both cases below would load cleanly and then fail only at poll time,
+        with an error the operator cannot act on. Failing at load instead
+        matches how this file treats every other operator mistake.
+        """
+        if self.output_format is not CommandOutputFormat.JSON:
+            return self
+        if self.logged:
+            # A logged command redirects stdout to the run log on the target and
+            # deliberately persists NO output on success (see
+            # CommandExecutor._apply_output_policy) — the full log is served by
+            # the /view + /trace endpoints instead. There is therefore never any
+            # stdout on the state for ?format=json to parse.
+            raise ValueError(
+                f"command '{self.command_name}': output_format \"json\" is "
+                "incompatible with logged=true — a logged command persists no "
+                "stdout on success (its output lives in the control_node run "
+                "log; use the /trace or /view endpoints instead)"
+            )
+        if self.disconnects_ssh:
+            # Fire-and-forget commands return no command_id and never write a
+            # CommandState, so the poll endpoint they'd be parsed by is
+            # unreachable for them.
+            raise ValueError(
+                f"command '{self.command_name}': output_format \"json\" is "
+                "incompatible with disconnects_ssh=true — such a command "
+                "returns no command_id and is never polled"
+            )
+        return self
+
 
 class UserCommandWhitelist(BaseModel):
     name: str = "admin"
@@ -154,6 +262,7 @@ class UserCommandWhitelist(BaseModel):
 
 # ── SSH Configuration ────────────────────────────────────────────────────────
 
+
 class SSHConnectionConfig(BaseModel):
     auth_method: str
     key_base64: str
@@ -162,10 +271,14 @@ class SSHConnectionConfig(BaseModel):
 
 # ── Request / Response ───────────────────────────────────────────────────────
 
+
 class CommandOption(BaseModel):
     timeout_seconds: int = 30
-    bastion_type: Optional[str] = None  # None → fall back to settings.BASTION_DEFAULT_TYPE
+    bastion_type: Optional[str] = (
+        None  # None → fall back to settings.BASTION_DEFAULT_TYPE
+    )
     ip_label: Optional[str] = None  # None → use settings.INVENTORY_IP_LABEL
+
 
 class CommandExecutionRequest(BaseModel):
     command_name: str
@@ -183,8 +296,10 @@ class CommandExecutionRequest(BaseModel):
     def _validate_min_script_version(self) -> "CommandExecutionRequest":
         if self.min_script_version is not None:
             from app.core.version import parse_semver
+
             parse_semver(self.min_script_version)  # raises ValueError if malformed
         return self
+
 
 class CommandExecutionResponse(BaseModel):
     command_id: Optional[str] = None
@@ -198,13 +313,62 @@ class CommandExecutionResponse(BaseModel):
     resolved_ip: Optional[str] = None
     pgids: List[int] = Field(default_factory=list)
 
-    @classmethod
-    def failed(cls, message: str, exit_status: Optional[int] = None, output: Optional[str] = None, command_id: Optional[str] = None) -> "CommandExecutionResponse":
-        return cls(status=CommandStatus.FAILED.value, message=message, exit_status=exit_status, output=output, command_id=command_id)
+    # ── Parsed output (populated only by GET /execution/{id}?format=json) ──
+    # `output` above always keeps its raw string value; these are purely
+    # additive so a caller that never passes ?format=json sees an unchanged
+    # response. Typed `Any` because the source script may legitimately emit an
+    # object, an array, or a scalar — pretending otherwise would reject valid
+    # payloads.
+    output_json: Optional[Any] = Field(
+        default=None,
+        description=(
+            "The command's stdout parsed as JSON. Populated only when "
+            "?format=json is requested AND the command's whitelist entry "
+            'declares output_format: "json" AND parsing succeeded. Null '
+            "otherwise — see output_json_error for why."
+        ),
+    )
+    output_json_error: Optional[OutputJsonError] = Field(
+        default=None,
+        description=(
+            "Why output_json is null despite ?format=json. "
+            '`parse_failed`: the command declared output_format "json" but '
+            "its stdout was not valid JSON — the remote script broke its "
+            "contract (logged server-side at ERROR). "
+            "`output_unavailable`: the command succeeded, but its stdout was "
+            "lost during cross-pod orphan-run recovery, which reconstructs the "
+            "exit code from the control_node marker without the output. "
+            "`not_applicable`: the command is not in a success state, so there "
+            "was never stdout to parse."
+        ),
+    )
 
     @classmethod
-    def success(cls, command_id: str, exit_status: int, output: str) -> "CommandExecutionResponse":
-        return cls(status=CommandStatus.SUCCESS.value, command_id=command_id, exit_status=exit_status, output=output)
+    def failed(
+        cls,
+        message: str,
+        exit_status: Optional[int] = None,
+        output: Optional[str] = None,
+        command_id: Optional[str] = None,
+    ) -> "CommandExecutionResponse":
+        return cls(
+            status=CommandStatus.FAILED.value,
+            message=message,
+            exit_status=exit_status,
+            output=output,
+            command_id=command_id,
+        )
+
+    @classmethod
+    def success(
+        cls, command_id: str, exit_status: int, output: str
+    ) -> "CommandExecutionResponse":
+        return cls(
+            status=CommandStatus.SUCCESS.value,
+            command_id=command_id,
+            exit_status=exit_status,
+            output=output,
+        )
 
 
 class CommandLogLine(BaseModel):
@@ -218,6 +382,7 @@ class CommandTraceResponse(BaseModel):
     Mirrors the deploy FormattedLogResponse but keyed by command_id and
     carrying the command's lifecycle status.
     """
+
     command_id: str
     status: str
     next_byte_offset: int
@@ -246,6 +411,7 @@ class RunningCommandsResponse(BaseModel):
 
 # ── Runtime Dataclasses ──────────────────────────────────────────────────────
 
+
 @dataclass
 class RunningCommandEntry:
     host_ip: str
@@ -254,6 +420,7 @@ class RunningCommandEntry:
     task: Optional[asyncio.Task] = None
     processes: List[asyncssh.SSHClientProcess] = field(default_factory=list)
     pgids: List[int] = field(default_factory=list)
+
 
 @dataclass
 class ExecutionContext:

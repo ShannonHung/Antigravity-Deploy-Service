@@ -24,7 +24,9 @@ def _make_repo() -> GitlabPipelineRepository:
     )
 
 
-def _make_pipeline_mock(bridges: list = (), jobs: list = (), variables: list = ()) -> MagicMock:
+def _make_pipeline_mock(
+    bridges: list = (), jobs: list = (), variables: list = ()
+) -> MagicMock:
     """Return a mocked python-gitlab Pipeline object with sub-resource lists."""
     pipeline = MagicMock()
     pipeline.bridges.list.return_value = list(bridges)

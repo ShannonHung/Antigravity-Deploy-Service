@@ -16,10 +16,10 @@ import bcrypt as _bcrypt
 from app.core.config import get_settings
 from app.core.exceptions import AuthException
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Password helpers
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def hash_password(plain: str) -> str:
     """Return a bcrypt hash of *plain*."""
@@ -34,6 +34,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 # ──────────────────────────────────────────────────────────────────────────────
 # JWT helpers
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def create_access_token(
     data: dict[str, Any],

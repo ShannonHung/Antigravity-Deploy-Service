@@ -1,4 +1,5 @@
 """Inventory resolution service."""
+
 from __future__ import annotations
 
 import logging
@@ -8,7 +9,6 @@ from typing import Dict, Optional
 from app.core.exceptions import CommandExecutionException, NotFoundException
 from app.repositories.host_resolver import cluster_type_from_name
 from app.repositories.inventory_repository import (
-    BastionMapping,
     ClusterBastionResolution,
     InventoryRepository,
     NodeBastionResolution,
@@ -43,7 +43,9 @@ class InventoryService:
             node_type = node_info.node_type
             bastion_type = self._node_type_map.get(node_type)
             if bastion_type is None:
-                known = ", ".join(f"{k!r}→{v!r}" for k, v in self._node_type_map.items())
+                known = ", ".join(
+                    f"{k!r}→{v!r}" for k, v in self._node_type_map.items()
+                )
                 raise CommandExecutionException(
                     f"node_type '{node_type}' has no bastion mapping. "
                     f"Known mappings: {{{known}}}. "
@@ -62,7 +64,8 @@ class InventoryService:
                     _logger.warning(
                         "Skipping invalid regex pattern %r in bastion mapping "
                         "(type=%s) — fix the mapping API data",
-                        pattern, bastion_type,
+                        pattern,
+                        bastion_type,
                     )
                     continue
                 if matched:
@@ -100,7 +103,8 @@ class InventoryService:
                     _logger.warning(
                         "Skipping invalid regex pattern %r in bastion mapping "
                         "(type=%s) — fix the mapping API data",
-                        pattern, bastion_type,
+                        pattern,
+                        bastion_type,
                     )
                     continue
                 if matched:

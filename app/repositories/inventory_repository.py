@@ -27,8 +27,8 @@ from app.core.exceptions import (
     UpstreamUnavailableException,
 )
 
-
 # ── Models ────────────────────────────────────────────────────────────────────
+
 
 class ClusterRef(BaseModel):
     id: str
@@ -86,6 +86,7 @@ class ClusterBastionResolution(BaseModel):
 
 # ── Abstract interfaces ───────────────────────────────────────────────────────
 
+
 class InventoryRepository(ABC):
     """Unified inventory service interface: node lookup + bastion mapping."""
 
@@ -97,6 +98,7 @@ class InventoryRepository(ABC):
 
 
 # ── HTTP implementation ───────────────────────────────────────────────────────
+
 
 class HttpInventoryRepository(InventoryRepository):
     """Single httpx client implementing all three inventory API interfaces."""
@@ -154,19 +156,19 @@ class HttpInventoryRepository(InventoryRepository):
 
         try:
             payload = resp.json()
-        except Exception:
+        except Exception as exc:
             raise UpstreamUnavailableException(
                 f"Cluster node lookup API returned non-JSON response for '{node_name}'.",
                 detail={"node_name": node_name},
-            )
+            ) from exc
 
         try:
             return ClusterNodeInfo.model_validate(payload)
-        except Exception:
+        except Exception as exc:
             raise UpstreamUnavailableException(
                 f"Cluster node lookup API returned unexpected payload shape for '{node_name}'.",
                 detail={"node_name": node_name},
-            )
+            ) from exc
 
     async def list_mappings(self, type_name: str) -> List[BastionMapping]:
         try:
@@ -196,11 +198,11 @@ class HttpInventoryRepository(InventoryRepository):
 
         try:
             payload = resp.json()
-        except Exception:
+        except Exception as exc:
             raise UpstreamUnavailableException(
                 f"Bastion mapping API returned non-JSON response for type '{type_name}'.",
                 detail={"type": type_name},
-            )
+            ) from exc
 
         if not isinstance(payload, dict) or "results" not in payload:
             raise UpstreamUnavailableException(

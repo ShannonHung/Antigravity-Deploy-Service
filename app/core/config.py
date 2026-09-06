@@ -10,7 +10,6 @@ The active environment is selected by the APP_ENV environment variable:
 
 from __future__ import annotations
 
-import json
 import os
 from functools import lru_cache
 from typing import Dict, Literal

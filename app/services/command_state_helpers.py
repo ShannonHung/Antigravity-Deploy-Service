@@ -7,7 +7,9 @@ from app.core.config import get_settings
 from app.repositories.command_state_repository import CommandStateRepository
 from app.services.command_ssh import SshSupport
 from app.core.exceptions import (
-    CommandExecutionException, NotFoundException, BaseAppException,
+    CommandExecutionException,
+    NotFoundException,
+    BaseAppException,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,8 +105,10 @@ class StateHelpers:
         tail = None
         if not success:
             tail = await self._ssh._read_log_tail(
-                state, settings.COMMAND_LOG_FAILURE_TAIL_LINES,
+                state,
+                settings.COMMAND_LOG_FAILURE_TAIL_LINES,
             )
+
         async def updater(s: CommandState):
             if success:
                 s.mark_success(code, "")
@@ -117,7 +121,8 @@ class StateHelpers:
 
         healed = await self.repo.update_if(
             state.command_id,
-            condition=lambda s: s.status in (CommandStatus.RUNNING, CommandStatus.KILLING),
+            condition=lambda s: s.status
+            in (CommandStatus.RUNNING, CommandStatus.KILLING),
             updater=updater,
             ttl_seconds=settings.COMMAND_RESULT_TTL_SECONDS,
         )

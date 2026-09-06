@@ -23,9 +23,17 @@ def test_exit_marker_path_appends_when_no_log_suffix():
 async def test_heal_returns_state_unchanged_when_no_marker(monkeypatch):
     h = _helpers()
     state = CommandState(
-        command_id="c1", status=CommandStatus.RUNNING, run_log_path="/runs/c1.log",
-        host="h", resolved_ip="1.2.3.4", port=2224, username="root",
-        ssh_config="control_node", request_id="r1", exec_command="x", killable=True,
+        command_id="c1",
+        status=CommandStatus.RUNNING,
+        run_log_path="/runs/c1.log",
+        host="h",
+        resolved_ip="1.2.3.4",
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        request_id="r1",
+        exec_command="x",
+        killable=True,
     )
     # No marker yet -> _read_run_exit_marker returns None -> passthrough.
     h._read_run_exit_marker = AsyncMock(return_value=None)

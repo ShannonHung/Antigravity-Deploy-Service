@@ -27,9 +27,7 @@ class TraceCacheRepository(ABC):
     """Abstract contract for caching immutable finished-job traces."""
 
     @abstractmethod
-    async def get(
-        self, project_id: int, job_id: int
-    ) -> tuple[str, bytes] | None:
+    async def get(self, project_id: int, job_id: int) -> tuple[str, bytes] | None:
         """Return ``(status, raw_trace_bytes)``, or ``None`` on miss."""
 
     @abstractmethod
@@ -62,9 +60,7 @@ class RedisTraceCache(TraceCacheRepository):
     def _key(self, project_id: int, job_id: int) -> str:
         return f"{self.PREFIX}:{project_id}:{job_id}"
 
-    async def get(
-        self, project_id: int, job_id: int
-    ) -> tuple[str, bytes] | None:
+    async def get(self, project_id: int, job_id: int) -> tuple[str, bytes] | None:
         blob = await self._redis.get(self._key(project_id, job_id))
         if blob is None:
             return None
@@ -75,20 +71,22 @@ class RedisTraceCache(TraceCacheRepository):
         except (OSError, gzip.BadGzipFile) as exc:
             _logger.warning(
                 "Discarding corrupted trace cache | project=%s job=%s | %s",
-                project_id, job_id, exc,
+                project_id,
+                job_id,
+                exc,
             )
             return None
 
         nl = decompressed.find(b"\n")
         if nl == -1:
             _logger.warning(
-                "Malformed trace cache (no status delimiter) | "
-                "project=%s job=%s",
-                project_id, job_id,
+                "Malformed trace cache (no status delimiter) | project=%s job=%s",
+                project_id,
+                job_id,
             )
             return None
         status = decompressed[:nl].decode("ascii", errors="replace")
-        raw = decompressed[nl + 1:]
+        raw = decompressed[nl + 1 :]
         return status, raw
 
     async def set(

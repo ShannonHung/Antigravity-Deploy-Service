@@ -6,7 +6,13 @@
       "description": "reboot",
       "disconnects_ssh": true,
       "killable": false,
-      "pipeline": [{"command": ["reboot"]}],
+      "pipeline": [
+        {
+          "command": [
+            "reboot"
+          ]
+        }
+      ],
       "arguments": []
     },
     {
@@ -14,8 +20,21 @@
       "description": "sleep",
       "disconnects_ssh": false,
       "killable": true,
-      "pipeline": [{"command": ["sleep", "{time}"]}],
-      "arguments": [{"name": "time", "type": "int", "validation_regex": "^[0-9]+$"}]
+      "pipeline": [
+        {
+          "command": [
+            "sleep",
+            "{time}"
+          ]
+        }
+      ],
+      "arguments": [
+        {
+          "name": "time",
+          "type": "int",
+          "validation_regex": "^[0-9]+$"
+        }
+      ]
     },
     {
       "command_name": "list_file",
@@ -23,10 +42,42 @@
       "disconnects_ssh": false,
       "killable": true,
       "pipeline": [
-        {"command": ["ls", "-al"]},
-        {"command": ["grep", "{key_word}"]}
+        {
+          "command": [
+            "ls",
+            "-al"
+          ]
+        },
+        {
+          "command": [
+            "grep",
+            "{key_word}"
+          ]
+        }
       ],
-      "arguments": [{"name": "key_word", "type": "string", "validation_regex": "^[a-zA-Z0-9._-]+$"}]
+      "arguments": [
+        {
+          "name": "key_word",
+          "type": "string",
+          "validation_regex": "^[a-zA-Z0-9._-]+$"
+        }
+      ]
+    },
+    {
+      "command_name": "report_json",
+      "description": "Example of a command whose stdout is JSON. Because it declares output_format \"json\", callers may poll it with ?format=json to get output_json parsed for them.",
+      "disconnects_ssh": false,
+      "killable": true,
+      "output_format": "json",
+      "pipeline": [
+        {
+          "command": [
+            "python3",
+            "/opt/scripts/report.py"
+          ]
+        }
+      ],
+      "arguments": []
     }
   ]
 }

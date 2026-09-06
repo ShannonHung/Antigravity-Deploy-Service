@@ -34,7 +34,7 @@ def pool_command_ids() -> List[str]:
     return list(_local_running_commands.keys())
 
 
-_execution_semaphore: Optional[asyncio.Semaphore] = None
+_execution_semaphore: Optional[asyncio.Semaphore] = None  # pylint: disable=invalid-name
 
 
 def _get_semaphore() -> asyncio.Semaphore:
