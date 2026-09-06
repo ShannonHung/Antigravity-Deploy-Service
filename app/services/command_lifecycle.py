@@ -23,7 +23,9 @@ class CommandLifecycle:
         self.repo = repo
         self._ssh = ssh
 
-    async def kill_command(self, command_id: str, message: str = "Killed", force: bool = False):
+    async def kill_command(
+        self, command_id: str, message: str = "Killed", force: bool = False
+    ):
         """Terminate a running command using two-phase PGID-based kill.
 
         Phase 1: ``kill -TERM -{pgid}`` (soft kill).
@@ -70,11 +72,13 @@ class CommandLifecycle:
             command_id,
             condition=lambda s: s.status == CommandStatus.RUNNING,
             updater=lambda s: s.mark_killing(message),
-            ttl_seconds=ttl
+            ttl_seconds=ttl,
         )
 
         if not success:
-            logger.info(f"Kill request aborted for {command_id}: Command is not in RUNNING state.")
+            logger.info(
+                f"Kill request aborted for {command_id}: Command is not in RUNNING state."
+            )
             return
 
         # 2. Perform SSH Kill Logic
@@ -112,29 +116,50 @@ class CommandLifecycle:
 
         try:
             conn = await asyncio.wait_for(
-                asyncssh.connect(host=state.resolved_ip, port=state.port, username=state.username, **conn_kwargs),
-                timeout=10
+                asyncssh.connect(
+                    host=state.resolved_ip,
+                    port=state.port,
+                    username=state.username,
+                    **conn_kwargs,
+                ),
+                timeout=10,
             )
             try:
                 await self._do_kill_via_connection(conn, state.pgids, command_id)
-                await self.repo.update(command_id, lambda s: s.mark_killed(message), ttl)
+                await self.repo.update(
+                    command_id, lambda s: s.mark_killed(message), ttl
+                )
             finally:
                 conn.close()
-        except Exception as e:
-            logger.error(f"Failed cross-pod kill for {command_id}: {e}", extra={"command_id": command_id})
+        # Cross-pod kill is best-effort over SSH; any failure is logged and the state left for the heal path.
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error(
+                f"Failed cross-pod kill for {command_id}: {e}",
+                extra={"command_id": command_id},
+            )
 
-    async def _do_kill_via_connection(self, conn: asyncssh.SSHClientConnection, pgids: List[int], command_id: str):
+    async def _do_kill_via_connection(
+        self, conn: asyncssh.SSHClientConnection, pgids: List[int], command_id: str
+    ):
         for pgid in pgids:
             try:
-                logger.info(f"Soft killing PGID {pgid}", extra={"command_id": command_id})
+                logger.info(
+                    f"Soft killing PGID {pgid}", extra={"command_id": command_id}
+                )
                 await conn.run(f"kill -TERM -{pgid}", check=False)
                 await asyncio.sleep(settings.COMMAND_KILL_GRACE_SECONDS)
                 res = await conn.run(f"kill -0 -{pgid}", check=False)
                 if res.exit_status == 0:
-                    logger.info(f"Process {pgid} still running, hard killing it.", extra={"command_id": command_id})
+                    logger.info(
+                        f"Process {pgid} still running, hard killing it.",
+                        extra={"command_id": command_id},
+                    )
                     await conn.run(f"kill -KILL -{pgid}", check=False)
-            except Exception as e:
-                logger.error(f"Error killing PGID {pgid}: {e}", extra={"command_id": command_id})
+            # Same best-effort kill guard as above.
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error(
+                    f"Error killing PGID {pgid}: {e}", extra={"command_id": command_id}
+                )
 
     async def list_running_commands(
         self, statuses: Optional[set[CommandStatus]] = None

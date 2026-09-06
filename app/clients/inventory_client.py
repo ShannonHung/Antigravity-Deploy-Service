@@ -3,6 +3,7 @@
 InventoryTokenManager  — 靜態 API key，未來可換成 JWT 只需改這個 class
 InventoryClient        — 實作 InventoryRepository
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +29,7 @@ _logger = logging.getLogger(__name__)
 
 
 # ── TokenManager（與 cluster-service 同結構，deploy-service 自己的副本）────────
+
 
 class TokenManager(ABC):
     def __init__(self, initial_token: str = "") -> None:
@@ -68,6 +70,7 @@ class InventoryTokenManager(TokenManager):
 
 
 # ── InventoryClient ───────────────────────────────────────────────────────────
+
 
 class InventoryClient(InventoryRepository):
     """Async HTTP client for the Inventory API."""
@@ -123,7 +126,10 @@ class InventoryClient(InventoryRepository):
             async with self._client() as client:
                 response = await client.request(method, path, **kwargs)
                 if response.status_code == 401:
-                    _logger.warning("Received 401 from inventory API (%s); refreshing token.", context)
+                    _logger.warning(
+                        "Received 401 from inventory API (%s); refreshing token.",
+                        context,
+                    )
                     await self._token_manager.refresh()
                     headers = await self._headers()
                     kwargs["headers"] = {**kwargs.get("headers", {}), **headers}
@@ -154,19 +160,19 @@ class InventoryClient(InventoryRepository):
 
         try:
             payload = response.json()
-        except Exception:
+        except Exception as exc:
             raise UpstreamUnavailableException(
                 f"Inventory API returned non-JSON for lookup_by_name('{node_name}').",
                 detail={"node_name": node_name},
-            )
+            ) from exc
 
         try:
             return ClusterNodeInfo.model_validate(payload)
-        except Exception:
+        except Exception as exc:
             raise UpstreamUnavailableException(
                 f"Inventory API returned unexpected payload shape for lookup_by_name('{node_name}').",
                 detail={"node_name": node_name},
-            )
+            ) from exc
 
     async def list_mappings(self, type_name: str) -> List[BastionMapping]:
         response = await self._request_with_retry(
@@ -180,11 +186,11 @@ class InventoryClient(InventoryRepository):
 
         try:
             payload = response.json()
-        except Exception:
+        except Exception as exc:
             raise UpstreamUnavailableException(
                 f"Inventory API returned non-JSON for list_mappings('{type_name}').",
                 detail={"type": type_name},
-            )
+            ) from exc
 
         if not isinstance(payload, dict) or "results" not in payload:
             raise UpstreamUnavailableException(

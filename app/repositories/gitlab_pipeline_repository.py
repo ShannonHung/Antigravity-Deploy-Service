@@ -47,9 +47,7 @@ _ACTIVE_STATUSES = [
 ]
 
 # Job statuses for which the trace is guaranteed immutable and safe to cache.
-_TERMINAL_JOB_STATUSES = frozenset(
-    {"success", "failed", "canceled", "skipped"}
-)
+_TERMINAL_JOB_STATUSES = frozenset({"success", "failed", "canceled", "skipped"})
 
 
 class GitlabPipelineRepository(PipelineRepository):
@@ -64,15 +62,23 @@ class GitlabPipelineRepository(PipelineRepository):
         http_timeout: int | None = None,
     ) -> None:
         settings = get_settings()
-        timeout = http_timeout if http_timeout is not None else settings.GITLAB_HTTP_TIMEOUT_SECONDS
+        timeout = (
+            http_timeout
+            if http_timeout is not None
+            else settings.GITLAB_HTTP_TIMEOUT_SECONDS
+        )
         ssl_verify: str | bool = settings.GITLAB_CA if settings.GITLAB_CA else True
-        self._gl = gitlab.Gitlab(url=url, private_token=token, timeout=timeout, ssl_verify=ssl_verify)
+        self._gl = gitlab.Gitlab(
+            url=url, private_token=token, timeout=timeout, ssl_verify=ssl_verify
+        )
         self._project_id = project_id
         self._trace_cache = trace_cache
         self._project_cache: Any = None
         _logger.debug(
             "GitlabPipelineRepository init | url=%s | project=%s | http_timeout=%ss",
-            url, project_id, timeout,
+            url,
+            project_id,
+            timeout,
         )
 
     # ── private helpers ───────────────────────────────────────────────────────
@@ -86,14 +92,17 @@ class GitlabPipelineRepository(PipelineRepository):
             project = self._gl.projects.get(self._project_id)
             _logger.debug(
                 "GitLab response | op=projects.get | project=%s | elapsed=%.2fs",
-                self._project_id, time.monotonic() - t0,
+                self._project_id,
+                time.monotonic() - t0,
             )
             self._project_cache = project
             return project
         except gitlab.exceptions.GitlabAuthenticationError as exc:
             _logger.error(
                 "GitLab authentication failed | project=%s | elapsed=%.2fs | %s",
-                self._project_id, time.monotonic() - t0, exc,
+                self._project_id,
+                time.monotonic() - t0,
+                exc,
             )
             raise GitlabOperationException(
                 "GitLab authentication failed — GITLAB_TOKEN is invalid or expired.",
@@ -102,7 +111,9 @@ class GitlabPipelineRepository(PipelineRepository):
         except gitlab.exceptions.GitlabGetError as exc:
             _logger.error(
                 "Failed to get project | id=%s | elapsed=%.2fs | %s",
-                self._project_id, time.monotonic() - t0, exc,
+                self._project_id,
+                time.monotonic() - t0,
+                exc,
             )
             raise GitlabOperationException(
                 f"GitLab project {self._project_id} not accessible.",
@@ -119,7 +130,10 @@ class GitlabPipelineRepository(PipelineRepository):
             _logger.debug(
                 "GitLab response | op=jobs.list | project=%s | pipeline_id=%s"
                 " | count=%d | elapsed=%.2fs",
-                self._project_id, pipeline_id, len(raw_jobs), time.monotonic() - t0,
+                self._project_id,
+                pipeline_id,
+                len(raw_jobs),
+                time.monotonic() - t0,
             )
             tags: set[str] = set()
             jobs: list[JobData] = []
@@ -130,7 +144,9 @@ class GitlabPipelineRepository(PipelineRepository):
         except gitlab.exceptions.GitlabError:
             return [], []
 
-    def _collect_variables(self, pipeline: Any, pipeline_id: int) -> list[PipelineVariable]:
+    def _collect_variables(
+        self, pipeline: Any, pipeline_id: int
+    ) -> list[PipelineVariable]:
         """Return all variables the pipeline was triggered with."""
         try:
             t0 = time.monotonic()
@@ -138,7 +154,10 @@ class GitlabPipelineRepository(PipelineRepository):
             _logger.debug(
                 "GitLab response | op=variables.list | project=%s | pipeline_id=%s"
                 " | count=%d | elapsed=%.2fs",
-                self._project_id, pipeline_id, len(raw), time.monotonic() - t0,
+                self._project_id,
+                pipeline_id,
+                len(raw),
+                time.monotonic() - t0,
             )
             return [PipelineVariable(key=v.key, value=v.value) for v in raw]
         except gitlab.exceptions.GitlabError:
@@ -154,7 +173,10 @@ class GitlabPipelineRepository(PipelineRepository):
             _logger.debug(
                 "GitLab response | op=bridges.list | project=%s | pipeline_id=%s"
                 " | count=%d | elapsed=%.2fs",
-                self._project_id, pipeline_id, len(bridges), time.monotonic() - t0,
+                self._project_id,
+                pipeline_id,
+                len(bridges),
+                time.monotonic() - t0,
             )
             result: list[DownstreamPipelineRef] = []
             for bridge in bridges:
@@ -229,7 +251,9 @@ class GitlabPipelineRepository(PipelineRepository):
         gl_vars = [{"key": k, "value": v} for k, v in variables.items()]
         _logger.info(
             "GitLab request | op=pipelines.create | project=%s | ref=%s | variables=%s",
-            self._project_id, ref, variables,
+            self._project_id,
+            ref,
+            variables,
         )
         t0 = time.monotonic()
 
@@ -240,15 +264,21 @@ class GitlabPipelineRepository(PipelineRepository):
                 _logger.info(
                     "GitLab response | op=pipelines.create | project=%s | pipeline_id=%s"
                     " | ref=%s | status=%s | elapsed=%.2fs",
-                    self._project_id, pipeline.id, ref,
-                    getattr(pipeline, "status", "unknown"), time.monotonic() - t0,
+                    self._project_id,
+                    pipeline.id,
+                    ref,
+                    getattr(pipeline, "status", "unknown"),
+                    time.monotonic() - t0,
                 )
                 return self._to_pipeline_data_minimal(pipeline)
             except gitlab.exceptions.GitlabCreateError as exc:
                 _logger.error(
                     "GitLab error | op=pipelines.create | project=%s | ref=%s"
                     " | elapsed=%.2fs | %s",
-                    self._project_id, ref, time.monotonic() - t0, exc,
+                    self._project_id,
+                    ref,
+                    time.monotonic() - t0,
+                    exc,
                 )
                 raise GitlabOperationException(
                     "Failed to trigger GitLab pipeline.",
@@ -260,7 +290,8 @@ class GitlabPipelineRepository(PipelineRepository):
     async def get(self, pipeline_id: int) -> PipelineData:
         _logger.debug(
             "GitLab request | op=pipelines.get | project=%s | pipeline_id=%s",
-            self._project_id, pipeline_id,
+            self._project_id,
+            pipeline_id,
         )
         t0 = time.monotonic()
 
@@ -271,15 +302,20 @@ class GitlabPipelineRepository(PipelineRepository):
                 _logger.debug(
                     "GitLab response | op=pipelines.get | project=%s | pipeline_id=%s"
                     " | status=%s | elapsed=%.2fs",
-                    self._project_id, pipeline_id,
-                    getattr(pipeline, "status", "unknown"), time.monotonic() - t0,
+                    self._project_id,
+                    pipeline_id,
+                    getattr(pipeline, "status", "unknown"),
+                    time.monotonic() - t0,
                 )
                 return self._to_pipeline_data(pipeline)
             except gitlab.exceptions.GitlabGetError as exc:
                 _logger.error(
                     "GitLab error | op=pipelines.get | project=%s | pipeline_id=%s"
                     " | elapsed=%.2fs | %s",
-                    self._project_id, pipeline_id, time.monotonic() - t0, exc,
+                    self._project_id,
+                    pipeline_id,
+                    time.monotonic() - t0,
+                    exc,
                 )
                 if "404" in str(exc):
                     raise NotFoundException(
@@ -295,7 +331,8 @@ class GitlabPipelineRepository(PipelineRepository):
     async def cancel(self, pipeline_id: int) -> PipelineData:
         _logger.info(
             "GitLab request | op=pipelines.cancel | project=%s | pipeline_id=%s",
-            self._project_id, pipeline_id,
+            self._project_id,
+            pipeline_id,
         )
         t0 = time.monotonic()
 
@@ -304,19 +341,24 @@ class GitlabPipelineRepository(PipelineRepository):
             try:
                 pipeline = project.pipelines.get(pipeline_id)
                 pipeline.cancel()
-                pipeline = project.pipelines.get(pipeline_id)   # refresh state
+                pipeline = project.pipelines.get(pipeline_id)  # refresh state
                 _logger.info(
                     "GitLab response | op=pipelines.cancel | project=%s | pipeline_id=%s"
                     " | status=%s | elapsed=%.2fs",
-                    self._project_id, pipeline_id,
-                    getattr(pipeline, "status", "unknown"), time.monotonic() - t0,
+                    self._project_id,
+                    pipeline_id,
+                    getattr(pipeline, "status", "unknown"),
+                    time.monotonic() - t0,
                 )
                 return self._to_pipeline_data_minimal(pipeline)
             except gitlab.exceptions.GitlabError as exc:
                 _logger.error(
                     "GitLab error | op=pipelines.cancel | project=%s | pipeline_id=%s"
                     " | elapsed=%.2fs | %s",
-                    self._project_id, pipeline_id, time.monotonic() - t0, exc,
+                    self._project_id,
+                    pipeline_id,
+                    time.monotonic() - t0,
+                    exc,
                 )
                 raise GitlabOperationException(
                     f"Failed to cancel pipeline {pipeline_id}.",
@@ -328,7 +370,8 @@ class GitlabPipelineRepository(PipelineRepository):
     async def retry(self, pipeline_id: int) -> PipelineData:
         _logger.info(
             "GitLab request | op=pipelines.retry | project=%s | pipeline_id=%s",
-            self._project_id, pipeline_id,
+            self._project_id,
+            pipeline_id,
         )
         t0 = time.monotonic()
 
@@ -337,19 +380,24 @@ class GitlabPipelineRepository(PipelineRepository):
             try:
                 pipeline = project.pipelines.get(pipeline_id)
                 pipeline.retry()
-                pipeline = project.pipelines.get(pipeline_id)   # refresh state
+                pipeline = project.pipelines.get(pipeline_id)  # refresh state
                 _logger.info(
                     "GitLab response | op=pipelines.retry | project=%s | pipeline_id=%s"
                     " | status=%s | elapsed=%.2fs",
-                    self._project_id, pipeline_id,
-                    getattr(pipeline, "status", "unknown"), time.monotonic() - t0,
+                    self._project_id,
+                    pipeline_id,
+                    getattr(pipeline, "status", "unknown"),
+                    time.monotonic() - t0,
                 )
                 return self._to_pipeline_data_minimal(pipeline)
             except gitlab.exceptions.GitlabError as exc:
                 _logger.error(
                     "GitLab error | op=pipelines.retry | project=%s | pipeline_id=%s"
                     " | elapsed=%.2fs | %s",
-                    self._project_id, pipeline_id, time.monotonic() - t0, exc,
+                    self._project_id,
+                    pipeline_id,
+                    time.monotonic() - t0,
+                    exc,
                 )
                 raise GitlabOperationException(
                     f"Failed to retry pipeline {pipeline_id}.",
@@ -373,7 +421,9 @@ class GitlabPipelineRepository(PipelineRepository):
         _logger.debug(
             "GitLab request | op=pipelines.list_running | project=%s | ref=%s"
             " | statuses=%s",
-            self._project_id, ref, _ACTIVE_STATUSES,
+            self._project_id,
+            ref,
+            _ACTIVE_STATUSES,
         )
         t0 = time.monotonic()
 
@@ -396,33 +446,44 @@ class GitlabPipelineRepository(PipelineRepository):
                         t_vars = time.monotonic()
                         try:
                             raw_vars = project.pipelines.get(p.id).variables.list()
-                            variables = [PipelineVariable(key=v.key, value=v.value) for v in raw_vars]
+                            variables = [
+                                PipelineVariable(key=v.key, value=v.value)
+                                for v in raw_vars
+                            ]
                         except gitlab.exceptions.GitlabError:
                             variables = []
                         _logger.debug(
                             "GitLab response | op=variables.list (list_running) | project=%s"
                             " | pipeline_id=%s | count=%d | elapsed=%.2fs",
-                            self._project_id, p.id, len(variables), time.monotonic() - t_vars,
+                            self._project_id,
+                            p.id,
+                            len(variables),
+                            time.monotonic() - t_vars,
                         )
-                        result.append(PipelineData(
-                            id=p.id,
-                            status=p.status,
-                            created_at=getattr(p, "created_at", None),
-                            updated_at=getattr(p, "updated_at", None),
-                            started_at=getattr(p, "started_at", None),
-                            finished_at=getattr(p, "finished_at", None),
-                            tag_list=[],
-                            variables=variables,
-                            jobs=[],
-                            downstream_pipelines=[],
-                            ref_name=getattr(p, "ref", ""),
-                            web_url=getattr(p, "web_url", ""),
-                        ))
+                        result.append(
+                            PipelineData(
+                                id=p.id,
+                                status=p.status,
+                                created_at=getattr(p, "created_at", None),
+                                updated_at=getattr(p, "updated_at", None),
+                                started_at=getattr(p, "started_at", None),
+                                finished_at=getattr(p, "finished_at", None),
+                                tag_list=[],
+                                variables=variables,
+                                jobs=[],
+                                downstream_pipelines=[],
+                                ref_name=getattr(p, "ref", ""),
+                                web_url=getattr(p, "web_url", ""),
+                            )
+                        )
             except gitlab.exceptions.GitlabError as exc:
                 _logger.error(
                     "GitLab error | op=pipelines.list_running | project=%s | ref=%s"
                     " | elapsed=%.2fs | %s",
-                    self._project_id, ref, time.monotonic() - t0, exc,
+                    self._project_id,
+                    ref,
+                    time.monotonic() - t0,
+                    exc,
                 )
                 raise GitlabOperationException(
                     f"Failed to list running pipelines on ref=’{ref}’.",
@@ -432,7 +493,10 @@ class GitlabPipelineRepository(PipelineRepository):
             _logger.debug(
                 "GitLab response | op=pipelines.list_running | project=%s | ref=%s"
                 " | found=%d | elapsed=%.2fs",
-                self._project_id, ref, len(result), time.monotonic() - t0,
+                self._project_id,
+                ref,
+                len(result),
+                time.monotonic() - t0,
             )
             return result
 
@@ -477,9 +541,7 @@ class GitlabPipelineRepository(PipelineRepository):
             cached = await self._trace_cache.get(self._project_id, job_id)
             if cached is not None:
                 cached_status, cached_bytes = cached
-                tail = (
-                    cached_bytes[byte_offset:] if byte_offset else cached_bytes
-                )
+                tail = cached_bytes[byte_offset:] if byte_offset else cached_bytes
                 return (
                     cached_status,
                     tail.decode("utf-8", errors="replace"),
@@ -523,11 +585,7 @@ class GitlabPipelineRepository(PipelineRepository):
 
         # Write cache once the job is terminal. The trace is immutable from
         # this point on, so future polls bypass GitLab entirely.
-        if (
-            self._trace_cache is not None
-            and status in _TERMINAL_JOB_STATUSES
-            and full
-        ):
+        if self._trace_cache is not None and status in _TERMINAL_JOB_STATUSES and full:
             try:
                 await self._trace_cache.set(
                     self._project_id,
@@ -536,10 +594,13 @@ class GitlabPipelineRepository(PipelineRepository):
                     full,
                     settings.GITLAB_TRACE_CACHE_TTL_SECONDS,
                 )
-            except Exception as exc:
+            # Best-effort enrichment; any SDK error must degrade rather than fail the request.
+            except Exception as exc:  # pylint: disable=broad-exception-caught
                 _logger.warning(
                     "Trace cache write failed | project=%s job=%s | %s",
-                    self._project_id, job_id, exc,
+                    self._project_id,
+                    job_id,
+                    exc,
                 )
 
         return status, tail.decode("utf-8", errors="replace"), len(full)

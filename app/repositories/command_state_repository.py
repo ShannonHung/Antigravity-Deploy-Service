@@ -1,4 +1,3 @@
-import json
 import asyncio
 import logging
 from datetime import timedelta
@@ -8,6 +7,7 @@ from app.domain.command import CommandState, CommandStatus
 from app.core.exceptions import CommandExecutionException
 
 _logger = logging.getLogger(__name__)
+
 
 class CommandStateRepository:
     PREFIX = "command"
@@ -22,19 +22,28 @@ class CommandStateRepository:
         await self.redis.setex(
             self._key(state.command_id),
             timedelta(seconds=ttl_seconds),
-            state.model_dump_json()
+            state.model_dump_json(),
         )
 
     async def get(self, command_id: str) -> CommandState:
         data = await self.redis.get(self._key(command_id))
         if not data:
-            raise CommandExecutionException(f"Execution record {command_id} not found in Redis.")
+            raise CommandExecutionException(
+                f"Execution record {command_id} not found in Redis."
+            )
         try:
             return CommandState.model_validate_json(data)
-        except Exception:
-            raise CommandExecutionException(f"Invalid record format for {command_id}.")
+        except Exception as exc:
+            raise CommandExecutionException(
+                f"Invalid record format for {command_id}."
+            ) from exc
 
-    async def update(self, command_id: str, updater: Callable[[CommandState], Coroutine[None, None, None] | None], ttl_seconds: int):
+    async def update(
+        self,
+        command_id: str,
+        updater: Callable[[CommandState], Coroutine[None, None, None] | None],
+        ttl_seconds: int,
+    ):
         """Fetch, apply updater function, and save state."""
         state = await self.get(command_id)
         result = updater(state)
@@ -42,7 +51,13 @@ class CommandStateRepository:
             await result
         await self.save(state, ttl_seconds)
 
-    async def update_if(self, command_id: str, condition: Callable[[CommandState], bool], updater: Callable[[CommandState], Coroutine[None, None, None] | None], ttl_seconds: int) -> bool:
+    async def update_if(
+        self,
+        command_id: str,
+        condition: Callable[[CommandState], bool],
+        updater: Callable[[CommandState], Coroutine[None, None, None] | None],
+        ttl_seconds: int,
+    ) -> bool:
         """Fetch, check condition, apply updater, and save. Returns True if updated, False otherwise."""
         state = await self.get(command_id)
         if not condition(state):
@@ -70,7 +85,8 @@ class CommandStateRepository:
                 continue
             try:
                 state = CommandState.model_validate_json(raw)
-            except Exception:
+            # A single unparseable Redis record must not abort a scan over all of them.
+            except Exception:  # pylint: disable=broad-exception-caught
                 _logger.warning("Skipping unparseable command state at key %s", key)
                 continue
             if statuses is None or state.status in statuses:

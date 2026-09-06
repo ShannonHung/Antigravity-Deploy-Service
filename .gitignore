@@ -36,6 +36,15 @@ data/allow-commands-*.json
 data/gitlab_auth.json
 !data/*.example.json
 
+# ── Locally generated TLS material (`make certs`) ────────────────────────────
+# The fake-api CA and server certs — including ca.key, a real private key — are
+# built on demand for local HTTPS. Never track them.
+fake-api/certs/
+data/ca.crt
+
+# ── macOS Finder metadata ────────────────────────────────────────────────────
+.DS_Store
+
 # ── Test-generated SSH key (created on the fly by tests/conftest.py) ────────
 tests/fixtures/SSH-default.json
 

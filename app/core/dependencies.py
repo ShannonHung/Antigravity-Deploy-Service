@@ -105,7 +105,9 @@ def get_current_user(required_scopes: list[str] | None = None) -> Callable:
     return _dependency
 
 
-def get_current_user_cookie_or_header(required_scopes: list[str] | None = None) -> Callable:
+def get_current_user_cookie_or_header(
+    required_scopes: list[str] | None = None,
+) -> Callable:
     """Like ``get_current_user`` but also accepts the JWT from the
     ``access_token`` cookie set by POST /token.
 
@@ -122,7 +124,9 @@ def get_current_user_cookie_or_header(required_scopes: list[str] | None = None) 
 
     async def _dependency(
         request: Request,
-        header_token: Optional[str] = Depends(OAuth2PasswordBearer(tokenUrl="/token", auto_error=False)),
+        header_token: Optional[str] = Depends(
+            OAuth2PasswordBearer(tokenUrl="/token", auto_error=False)
+        ),
     ) -> User:
         token = header_token or request.cookies.get(ACCESS_TOKEN_COOKIE)
         if not token:
@@ -130,6 +134,7 @@ def get_current_user_cookie_or_header(required_scopes: list[str] | None = None) 
         return _validate_token(token, required)
 
     return _dependency
+
 
 from app.clients.inventory_client import InventoryClient, InventoryTokenManager
 from app.core.redis_client import RedisClient
@@ -143,7 +148,9 @@ from app.services.command_service import CommandService
 from app.services.inventory_service import InventoryService
 from app.core.config import get_settings
 
-_inventory_token_manager: InventoryTokenManager | None = None
+_inventory_token_manager: InventoryTokenManager | None = (
+    None  # pylint: disable=invalid-name
+)
 
 
 def _get_inventory_token_manager() -> InventoryTokenManager:
