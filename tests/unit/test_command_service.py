@@ -42,9 +42,11 @@ def test_mark_failed_exit_code_and_output_optional():
     assert state.exit_code is None
     assert state.output is None
 
+
 def test_anti_injection_pass():
     svc = CommandService(None)  # repo not used for this method
     svc._executor._validate_anti_injection("safe_string_123")
+
 
 def test_anti_injection_fail():
     svc = CommandService(None)
@@ -66,7 +68,9 @@ import app.services.command_service as svc_module
 from unittest.mock import AsyncMock, MagicMock
 
 from app.domain.command import (
-    CommandExecutionRequest, CommandOption, HostType,
+    CommandExecutionRequest,
+    CommandOption,
+    HostType,
 )
 from app.repositories.inventory_repository import BastionMapping
 from app.repositories.inventory_repository import ClusterNodeInfo, ClusterRef, NodeInfo
@@ -83,7 +87,9 @@ def _service_for_bastion(inventory_repo):
     )
 
 
-def _node_lookup(cluster: str, node_type: str = "baremetal") -> InMemoryInventoryRepository:
+def _node_lookup(
+    cluster: str, node_type: str = "baremetal"
+) -> InMemoryInventoryRepository:
     return InMemoryInventoryRepository(
         nodes={
             "n1": ClusterNodeInfo(
@@ -95,7 +101,9 @@ def _node_lookup(cluster: str, node_type: str = "baremetal") -> InMemoryInventor
     )
 
 
-def _inventory(cluster: str, type_name: str, ip: str, node_type: str = "baremetal") -> InMemoryInventoryRepository:
+def _inventory(
+    cluster: str, type_name: str, ip: str, node_type: str = "baremetal"
+) -> InMemoryInventoryRepository:
     return InMemoryInventoryRepository(
         nodes={
             "n1": ClusterNodeInfo(
@@ -105,23 +113,36 @@ def _inventory(cluster: str, type_name: str, ip: str, node_type: str = "baremeta
             )
         },
         mappings={
-            type_name: [BastionMapping(
-                patterns=[".*"], runner="r", bastion="b", bastion_ip=ip,
-            )]
+            type_name: [
+                BastionMapping(
+                    patterns=[".*"],
+                    runner="r",
+                    bastion="b",
+                    bastion_ip=ip,
+                )
+            ]
         },
     )
 
 
 async def test_bastion_type_explicit_in_option_overrides_node_type_map(monkeypatch):
     """When option.bastion_type='type2' is set, it overrides node_type_map lookup."""
-    monkeypatch.setattr(svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"})
+    monkeypatch.setattr(
+        svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"}
+    )
     # Only 'type2' has a mapping; if the resolver used node_type_map it would pick type1 and 404.
-    inventory_repo = _inventory("any-cluster", "type2", "10.10.10.10", node_type="baremetal")
+    inventory_repo = _inventory(
+        "any-cluster", "type2", "10.10.10.10", node_type="baremetal"
+    )
     svc = _service_for_bastion(inventory_repo)
 
     req = CommandExecutionRequest(
-        command_name="list_file", host="n1", host_type=HostType.BASTION,
-        port=22, username="root", ssh_config="default",
+        command_name="list_file",
+        host="n1",
+        host_type=HostType.BASTION,
+        port=22,
+        username="root",
+        ssh_config="default",
         option=CommandOption(timeout_seconds=30, bastion_type="type2"),
         arguments={"key_word": "ssh"},
     )
@@ -132,13 +153,21 @@ async def test_bastion_type_explicit_in_option_overrides_node_type_map(monkeypat
 
 async def test_bastion_type_derived_from_node_type_map_when_no_option(monkeypatch):
     """When option.bastion_type is absent, node_type is looked up in BASTION_NODE_TYPE_MAP."""
-    monkeypatch.setattr(svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"})
-    inventory_repo = _inventory("any-cluster", "type1", "10.20.30.40", node_type="baremetal")
+    monkeypatch.setattr(
+        svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"}
+    )
+    inventory_repo = _inventory(
+        "any-cluster", "type1", "10.20.30.40", node_type="baremetal"
+    )
     svc = _service_for_bastion(inventory_repo)
 
     req = CommandExecutionRequest(
-        command_name="list_file", host="n1", host_type=HostType.BASTION,
-        port=22, username="root", ssh_config="default",
+        command_name="list_file",
+        host="n1",
+        host_type=HostType.BASTION,
+        port=22,
+        username="root",
+        ssh_config="default",
         option=CommandOption(timeout_seconds=30),
         arguments={"key_word": "ssh"},
     )
@@ -150,13 +179,21 @@ async def test_bastion_type_derived_from_node_type_map_when_no_option(monkeypatc
 async def test_unknown_node_type_not_in_map_raises_with_clear_message(monkeypatch):
     """When node_type has no entry in BASTION_NODE_TYPE_MAP, raise CommandExecutionException
     with the unknown node_type and the current map contents in the message."""
-    monkeypatch.setattr(svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"})
-    inventory_repo = _inventory("any-cluster", "type1", "10.0.0.1", node_type="unknown-hw")
+    monkeypatch.setattr(
+        svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"}
+    )
+    inventory_repo = _inventory(
+        "any-cluster", "type1", "10.0.0.1", node_type="unknown-hw"
+    )
     svc = _service_for_bastion(inventory_repo)
 
     req = CommandExecutionRequest(
-        command_name="list_file", host="n1", host_type=HostType.BASTION,
-        port=22, username="root", ssh_config="default",
+        command_name="list_file",
+        host="n1",
+        host_type=HostType.BASTION,
+        port=22,
+        username="root",
+        ssh_config="default",
         arguments={"key_word": "ssh"},
     )
 

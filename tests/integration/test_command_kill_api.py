@@ -7,6 +7,7 @@ so nothing happened. The 'accepted' response was misleading. A non-killable
 command must be rejected up front with a 409, mirroring the existing
 "wrong state" rejection.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -17,10 +18,17 @@ from app.domain.command import CommandState, CommandStatus
 
 def _state(killable: bool, status=CommandStatus.RUNNING):
     return CommandState(
-        command_id="c1", status=status, host="localhost",
-        resolved_ip="127.0.0.1", port=2224, username="root",
-        ssh_config="control_node", request_id="r1", exec_command="x",
-        killable=killable, run_log_path="/var/log/ansible-runs/c1.log",
+        command_id="c1",
+        status=status,
+        host="localhost",
+        resolved_ip="127.0.0.1",
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        request_id="r1",
+        exec_command="x",
+        killable=killable,
+        run_log_path="/var/log/ansible-runs/c1.log",
     )
 
 

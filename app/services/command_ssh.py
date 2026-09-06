@@ -40,11 +40,13 @@ class SshSupport:
                     "SSH configuration not found.",
                     detail={"target": target},
                 )
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         return SSHConnectionConfig(**data)
 
-    async def _connect_to_control_node(self, state: CommandState) -> asyncssh.SSHClientConnection:
+    async def _connect_to_control_node(
+        self, state: CommandState
+    ) -> asyncssh.SSHClientConnection:
         """Open an SSH connection back to the control_node for a stored run.
 
         Shared by the log viewer (``_read_remote_log``) and orphan-run recovery
@@ -62,8 +64,10 @@ class SshSupport:
         try:
             return await asyncio.wait_for(
                 asyncssh.connect(
-                    host=state.resolved_ip, port=state.port,
-                    username=state.username, **conn_kwargs,
+                    host=state.resolved_ip,
+                    port=state.port,
+                    username=state.username,
+                    **conn_kwargs,
                 ),
                 timeout=settings.SSH_CONNECT_TIMEOUT_SECONDS,
             )

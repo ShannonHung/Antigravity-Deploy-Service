@@ -41,6 +41,7 @@ class _InMemoryCommandStateRepo:
     @staticmethod
     async def _apply(updater, state):
         import inspect
+
         result = updater(state)
         if inspect.isawaitable(result):
             await result
@@ -73,7 +74,9 @@ def inventory_repo():
         nodes={
             "node-a01": ClusterNodeInfo(
                 node_type="baremetal",
-                node=NodeInfo(id="1", name="node-a01", labels={"mgmt_ip": "10.0.1.10/24"}),
+                node=NodeInfo(
+                    id="1", name="node-a01", labels={"mgmt_ip": "10.0.1.10/24"}
+                ),
                 cluster=ClusterRef(id="1", name="cluster-c1"),
             ),
         }
@@ -155,14 +158,20 @@ def test_host_type_hostname_connects_to_resolved_ip(client_with_cluster_repo):
 @pytest.fixture
 def client_with_bastion(monkeypatch):
     """TestClient with a unified inventory repo covering both node lookup and bastion mapping."""
-    monkeypatch.setattr(svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"})
+    monkeypatch.setattr(
+        svc_module.settings, "BASTION_NODE_TYPE_MAP", {"baremetal": "type1"}
+    )
     app = create_app()
     state_repo = _InMemoryCommandStateRepo()
     inv_repo = InMemoryInventoryRepository(
         nodes={
             "node1": ClusterNodeInfo(
                 node_type="baremetal",
-                node=NodeInfo(id="1", name="node1", labels={"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"}),
+                node=NodeInfo(
+                    id="1",
+                    name="node1",
+                    labels={"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"},
+                ),
                 cluster=ClusterRef(id="1", name="type1-cluster-c1"),
             ),
         },
@@ -170,7 +179,8 @@ def client_with_bastion(monkeypatch):
             "type1": [
                 BastionMapping(
                     patterns=["type1-cluster-(c1|c2|c3)", "type1-cluster.*"],
-                    runner="r1", bastion="bastion-type1",
+                    runner="r1",
+                    bastion="bastion-type1",
                     bastion_ip="10.99.99.1",
                 )
             ]
@@ -268,9 +278,9 @@ def test_poll_response_surfaces_host_type_resolved_ip_and_pgids(
             assert command_id == "fixed-id"
             return fixed_state
 
-    client_with_cluster_repo.app.dependency_overrides[
-        get_command_state_repository
-    ] = lambda: _StubRepo()
+    client_with_cluster_repo.app.dependency_overrides[get_command_state_repository] = (
+        lambda: _StubRepo()
+    )
 
     token = _get_token(client_with_cluster_repo)
     resp = client_with_cluster_repo.get(

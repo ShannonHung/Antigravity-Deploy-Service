@@ -9,17 +9,15 @@ Kept separate from models.py to avoid bloating the auth models file.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Any
+from typing import Any
 import json
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.domain.models import ApiResponse
-
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Request models
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class PipelineVariable(BaseModel):
     """A single key-value variable passed to a GitLab pipeline."""
@@ -28,10 +26,11 @@ class PipelineVariable(BaseModel):
     value: Any
 
     @field_validator("value", mode="before")
+    @classmethod
     def stringify_complex_types(cls, v: Any) -> str:
         """Convert objects/lists into JSON strings because GitLab expects strings."""
         if isinstance(v, (dict, list)):
-            return json.dumps(v, separators=(',', ':'))
+            return json.dumps(v, separators=(",", ":"))
         return str(v)
 
 
@@ -47,6 +46,7 @@ class TriggerPipelineRequest(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 # Data payloads (returned inside ApiResponse[T])
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class JobData(BaseModel):
     """Job summary returned inside PipelineData."""

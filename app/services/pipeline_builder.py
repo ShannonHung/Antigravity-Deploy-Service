@@ -11,8 +11,11 @@ class PipelineBuilder:
     """
 
     def resolve_part(
-        self, part: str, arguments: Dict[str, Any],
-        arg_defs: List[CommandArgumentConfig], run_id: Optional[str] = None,
+        self,
+        part: str,
+        arguments: Dict[str, Any],
+        arg_defs: List[CommandArgumentConfig],
+        run_id: Optional[str] = None,
     ) -> str:
         """Replace {placeholder} tokens in a single command part.
 
@@ -28,7 +31,9 @@ class PipelineBuilder:
         return part
 
     def strip_omitted_optionals(
-        self, command: List[str], arguments: Dict[str, Any],
+        self,
+        command: List[str],
+        arguments: Dict[str, Any],
         arg_defs: List[CommandArgumentConfig],
     ) -> List[str]:
         """Remove pipeline tokens for optional args that weren't supplied.
@@ -38,7 +43,8 @@ class PipelineBuilder:
         before it (so ``["--limit", "{limit}"]`` disappears entirely).
         """
         omitted = {
-            arg.name for arg in arg_defs
+            arg.name
+            for arg in arg_defs
             if not arg.required and arguments.get(arg.name) is None
         }
         if not omitted:
@@ -49,7 +55,11 @@ class PipelineBuilder:
         for i, tok in enumerate(command):
             if any(ph in tok for ph in omitted_placeholders):
                 drop.add(i)
-                if i > 0 and command[i - 1].startswith("-") and "{" not in command[i - 1]:
+                if (
+                    i > 0
+                    and command[i - 1].startswith("-")
+                    and "{" not in command[i - 1]
+                ):
                     drop.add(i - 1)
         return [tok for i, tok in enumerate(command) if i not in drop]
 

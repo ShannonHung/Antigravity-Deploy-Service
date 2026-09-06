@@ -1,4 +1,5 @@
 """Unit tests for InventoryService."""
+
 from __future__ import annotations
 
 import pytest
@@ -14,7 +15,6 @@ from app.repositories.inventory_repository import (
 )
 from app.services.inventory_service import InventoryService
 from tests.fixtures.cluster import InMemoryInventoryRepository
-
 
 _NODE_TYPE_MAP = {"baremetal": "type1", "virtual-machine": "type2"}
 
@@ -41,6 +41,7 @@ def _service(repo, node_type_map=None) -> InventoryService:
 
 
 # ── Happy path ────────────────────────────────────────────────────────────────
+
 
 async def test_resolve_uses_config_node_type_map():
     mappings = {
@@ -79,7 +80,9 @@ async def test_resolve_bastion_type_override_sets_query_param_source():
     }
     # node_type=baremetal would map to type1 via config, but override forces override-type
     svc = _service(_repo(cluster_name="any-cluster", mappings=mappings))
-    result = await svc.resolve_node_bastion("node1", bastion_type_override="override-type")
+    result = await svc.resolve_node_bastion(
+        "node1", bastion_type_override="override-type"
+    )
 
     assert result.bastion_type == "override-type"
     assert result.bastion_type_source == "query_param"
@@ -137,6 +140,7 @@ async def test_resolve_second_entry_matches_when_first_does_not():
 
 # ── Error cases ───────────────────────────────────────────────────────────────
 
+
 async def test_resolve_node_not_found_raises_not_found():
     svc = _service(InMemoryInventoryRepository(nodes={}, mappings={}))
     with pytest.raises(NotFoundException):
@@ -145,7 +149,11 @@ async def test_resolve_node_not_found_raises_not_found():
 
 async def test_resolve_unknown_node_type_raises_command_execution_exception():
     mappings = {
-        "type1": [BastionMapping(patterns=[".*"], runner="r", bastion="b", bastion_ip="1.1.1.1")]
+        "type1": [
+            BastionMapping(
+                patterns=[".*"], runner="r", bastion="b", bastion_ip="1.1.1.1"
+            )
+        ]
     }
     svc = _service(
         _repo(node_type="unknown-type", mappings=mappings),
@@ -176,6 +184,7 @@ async def test_resolve_no_pattern_matches_raises_not_found():
 async def test_resolve_invalid_regex_pattern_is_skipped(caplog):
     """An invalid regex in mapping data is logged and skipped; next pattern tried."""
     import logging
+
     mappings = {
         "type1": [
             BastionMapping(
@@ -190,8 +199,10 @@ async def test_resolve_invalid_regex_pattern_is_skipped(caplog):
     with caplog.at_level(logging.WARNING):
         result = await svc.resolve_node_bastion("node1")
     assert result.matched_pattern == ".*"
-    assert any("invalid" in record.message.lower() or "regex" in record.message.lower()
-               for record in caplog.records)
+    assert any(
+        "invalid" in record.message.lower() or "regex" in record.message.lower()
+        for record in caplog.records
+    )
 
 
 # ── Cluster bastion resolution ─────────────────────────────────────────────────
@@ -202,8 +213,22 @@ _SLASH = {"no_slash": "type1", "with_slash": "type2"}
 def _svc():
     repo = InMemoryInventoryRepository(
         mappings={
-            "type1": [BastionMapping(patterns=["taiwan-.*"], runner="r1", bastion="b1", bastion_ip="10.1.0.1")],
-            "type2": [BastionMapping(patterns=["taiwan-taipei/.*"], runner="r2", bastion="b2", bastion_ip="10.2.0.2")],
+            "type1": [
+                BastionMapping(
+                    patterns=["taiwan-.*"],
+                    runner="r1",
+                    bastion="b1",
+                    bastion_ip="10.1.0.1",
+                )
+            ],
+            "type2": [
+                BastionMapping(
+                    patterns=["taiwan-taipei/.*"],
+                    runner="r2",
+                    bastion="b2",
+                    bastion_ip="10.2.0.2",
+                )
+            ],
         }
     )
     return InventoryService(repo=repo, node_type_map={}, slash_map=_SLASH)
@@ -226,7 +251,13 @@ async def test_resolve_cluster_bastion_with_slash():
 
 async def test_resolve_cluster_bastion_no_match():
     repo = InMemoryInventoryRepository(
-        mappings={"type1": [BastionMapping(patterns=["nope-.*"], runner="r", bastion="b", bastion_ip="9.9.9.9")]}
+        mappings={
+            "type1": [
+                BastionMapping(
+                    patterns=["nope-.*"], runner="r", bastion="b", bastion_ip="9.9.9.9"
+                )
+            ]
+        }
     )
     svc = InventoryService(repo=repo, node_type_map={}, slash_map=_SLASH)
     with pytest.raises(NotFoundException):

@@ -16,7 +16,10 @@ from app.domain.pipeline_models import FormattedLogLine
 # still anchors at the start of the line (GitLab emits "<ts> 00O \x1b[0K...").
 _TS_REGEX = re.compile(r"^(\[?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\]?)\s*")
 # GitLab section markers and clear-line codes (like [0K, [0G)
-_MARKER_REGEX = re.compile(r"\x1b\[[0-9;]*[GK]|section_(?:start|end):\d+:[^\r\n\u001b\[]+")
+_MARKER_REGEX = re.compile(
+    r"\x1b\[[0-9;]*[GK]|section_(?:start|end):\d+:[^\r\n\u001b\[]+"
+)
+
 
 class LogRenderer:
     """Processes raw ANSI logs into structured HTML lines."""
@@ -38,12 +41,12 @@ class LogRenderer:
         larger log so numbering stays continuous across polls.
         """
         # Split by newline only, preserving \r within lines for terminal simulation
-        if raw_text.endswith('\n'):
+        if raw_text.endswith("\n"):
             raw_text = raw_text[:-1]
-        lines = raw_text.split('\n')
+        lines = raw_text.split("\n")
         result = []
 
-        for i, raw_line in enumerate(lines):
+        for raw_line in lines:
             line = raw_line
 
             # 1. Remove timestamp prefixes if any (GitLab injects these)
@@ -55,19 +58,24 @@ class LogRenderer:
             line = re.sub(r"^\s*\d{1,2}[A-Za-z][\+\-]?\s?", "", line)
 
             # Strip section markers (but optionally keep the text)
-            line = re.sub(r"section_start:\d+:[^\r\n\u001b\[]+(?:\r|(?:\x1b\[0K))?", "", line)
-            line = re.sub(r"section_end:\d+:[^\r\n\u001b\[]+(?:\r|(?:\x1b\[0K))?", "", line)
+            line = re.sub(
+                r"section_start:\d+:[^\r\n\u001b\[]+(?:\r|(?:\x1b\[0K))?", "", line
+            )
+            line = re.sub(
+                r"section_end:\d+:[^\r\n\u001b\[]+(?:\r|(?:\x1b\[0K))?", "", line
+            )
 
             # 3. Simulate terminal carriage return \r
-            if '\r' in line:
-                parts = line.split('\r')
+            if "\r" in line:
+                parts = line.split("\r")
                 res = parts[0]
                 for p in parts[1:]:
-                    if not p: continue
+                    if not p:
+                        continue
                     if len(p) >= len(res):
                         res = p
                     else:
-                        res = p + res[len(p):]
+                        res = p + res[len(p) :]
                 line = res
 
             # Clean structural markers and any residual ANSI sequences
@@ -81,14 +89,16 @@ class LogRenderer:
 
             # 4. Convert ANSI to HTML
             content_html = self._conv.convert(line, full=False)
-            
+
             # Skip lines that are completely empty (no html, no whitespace)
             if not content_html.strip():
                 continue
 
-            result.append(FormattedLogLine(
-                num=start_line_num + len(result),
-                content_html=content_html,
-            ))
+            result.append(
+                FormattedLogLine(
+                    num=start_line_num + len(result),
+                    content_html=content_html,
+                )
+            )
 
         return result

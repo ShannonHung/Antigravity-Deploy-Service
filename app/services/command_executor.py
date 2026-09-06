@@ -5,15 +5,18 @@ import re
 import uuid
 import os
 import shlex
-import asyncssh
 from typing import Any, List, Optional
+import asyncssh
 
 from pydantic import ValidationError
 
 from app.domain.command import (
-    CommandExecutionRequest, CommandExecutionResponse,
-    UserCommandWhitelist, ExecutionContext,
-    CommandState, CommandStatus,
+    CommandExecutionRequest,
+    CommandExecutionResponse,
+    UserCommandWhitelist,
+    ExecutionContext,
+    CommandState,
+    CommandStatus,
     RunningCommandEntry,
 )
 from app.core.config import get_settings
@@ -24,7 +27,13 @@ from app.repositories.host_resolver import create_host_resolver
 from app.services.pipeline_builder import PipelineBuilder
 from app.services.command_ssh import SshSupport
 from app.services.command_lifecycle import CommandLifecycle
-from app.services.command_pool import pool_add, pool_get, pool_remove, pool_size, _get_semaphore
+from app.services.command_pool import (
+    pool_add,
+    pool_get,
+    pool_remove,
+    pool_size,
+    _get_semaphore,
+)
 from app.core.exceptions import (
     CommandExecutionException,
     UpstreamTimeoutException,
@@ -104,13 +113,15 @@ class CommandExecutor:
                 malformed (e.g. an invalid regex in ``validation_regex`` /
                 ``allow_hosts``).
         """
-        file_path = os.path.join(settings.COMMAND_CONFIG_DIR, f"allow-commands-{username}.json")
+        file_path = os.path.join(
+            settings.COMMAND_CONFIG_DIR, f"allow-commands-{username}.json"
+        )
         if not os.path.exists(file_path):
             raise ForbiddenException(
                 f"User '{username}' has no command whitelist configured.",
                 detail={"username": username},
             )
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         try:
             return UserCommandWhitelist(**data)
@@ -123,13 +134,21 @@ class CommandExecutor:
                 f"Invalid command whitelist for user '{username}': {exc}",
                 extra={"username": username, "file_path": file_path},
             )
+            errors = _format_validation_errors(exc)
+            # Carry the offending field(s) in the message, not only in `detail`:
+            # this is an operator-facing 500 and the whole point is that they can
+            # tell WHICH command is broken without reading the source.
             raise WhitelistConfigurationException(
-                f"Command whitelist for user '{username}' is misconfigured.",
-                detail={"username": username, "errors": _format_validation_errors(exc)},
+                f"Command whitelist for user '{username}' is misconfigured: "
+                + "; ".join(errors),
+                detail={"username": username, "errors": errors},
             ) from exc
 
     async def _prepare_execution(
-        self, username: str, request_id: str, req: CommandExecutionRequest,
+        self,
+        username: str,
+        request_id: str,
+        req: CommandExecutionRequest,
     ) -> ExecutionContext:
         """Validate the incoming request and assemble an ExecutionContext.
 
@@ -150,12 +169,11 @@ class CommandExecutor:
         whitelist = self._load_user_whitelist(username)
 
         bastion_type = (
-            req.option.bastion_type
-            if req.option and req.option.bastion_type
-            else None
+            req.option.bastion_type if req.option and req.option.bastion_type else None
         )
         ip_label = (
-            req.option.ip_label if req.option and req.option.ip_label
+            req.option.ip_label
+            if req.option and req.option.ip_label
             else settings.INVENTORY_IP_LABEL
         )
         resolver = create_host_resolver(
@@ -172,8 +190,10 @@ class CommandExecutor:
             logger.warning(
                 f"Host '{resolved.ip}' is blocked for user '{username}' by deny list.",
                 extra={
-                    "request_id": request_id, "username": username,
-                    "host": req.host, "host_type": req.host_type.value,
+                    "request_id": request_id,
+                    "username": username,
+                    "host": req.host,
+                    "host_type": req.host_type.value,
                     "resolved_ip": resolved.ip,
                 },
             )
@@ -186,8 +206,10 @@ class CommandExecutor:
             logger.warning(
                 f"Host '{resolved.ip}' is not allowed for user '{username}' by allow list.",
                 extra={
-                    "request_id": request_id, "username": username,
-                    "host": req.host, "host_type": req.host_type.value,
+                    "request_id": request_id,
+                    "username": username,
+                    "host": req.host,
+                    "host_type": req.host_type.value,
                     "resolved_ip": resolved.ip,
                 },
             )
@@ -286,8 +308,9 @@ class CommandExecutor:
                 detail={"script": script, "required": effective_min},
             )
 
-        raw = (str(result.stdout) if result.stdout else "") + \
-              ("\n" + str(result.stderr) if result.stderr else "")
+        raw = (str(result.stdout) if result.stdout else "") + (
+            "\n" + str(result.stderr) if result.stderr else ""
+        )
         try:
             actual = CommandExecutor._parse_version_output(raw)
         except ValueError as exc:
@@ -311,7 +334,9 @@ class CommandExecutor:
                 detail={"script": script, "actual": actual, "required": effective_min},
             )
 
-    async def _connect(self, context: ExecutionContext, req: CommandExecutionRequest) -> asyncssh.SSHClientConnection:
+    async def _connect(
+        self, context: ExecutionContext, req: CommandExecutionRequest
+    ) -> asyncssh.SSHClientConnection:
         """Establish an SSH connection to the target host.
 
         Delegates credential handling to the authenticator resolved from
@@ -343,8 +368,10 @@ class CommandExecutor:
                 f"SSH connection to {target} (host_type={req.host_type.value}, raw={req.host}) "
                 f"timed out after {settings.SSH_CONNECT_TIMEOUT_SECONDS}s.",
                 detail={
-                    "host": req.host, "host_type": req.host_type.value,
-                    "resolved_ip": ip, "port": req.port,
+                    "host": req.host,
+                    "host_type": req.host_type.value,
+                    "resolved_ip": ip,
+                    "port": req.port,
                 },
             ) from exc
         except (OSError, asyncssh.Error) as exc:
@@ -355,12 +382,16 @@ class CommandExecutor:
             raise UpstreamUnavailableException(
                 f"SSH connection to {target} (host_type={req.host_type.value}, raw={req.host}) failed: {exc}",
                 detail={
-                    "host": req.host, "host_type": req.host_type.value,
-                    "resolved_ip": ip, "port": req.port,
+                    "host": req.host,
+                    "host_type": req.host_type.value,
+                    "resolved_ip": ip,
+                    "port": req.port,
                 },
             ) from exc
 
-    async def _handle_fire_and_forget(self, context: ExecutionContext) -> CommandExecutionResponse:
+    async def _handle_fire_and_forget(
+        self, context: ExecutionContext
+    ) -> CommandExecutionResponse:
         """Execute a command that is expected to sever the SSH connection (e.g. reboot).
 
         Uses dual-mode detection:
@@ -374,8 +405,10 @@ class CommandExecutor:
         conn = context.conn
         target = f"{context.raw_request.host}:{context.raw_request.port}"
         log_extra = {
-            "request_id": context.request_id, "username": context.username,
-            "host": context.raw_request.host, "port": context.raw_request.port,
+            "request_id": context.request_id,
+            "username": context.username,
+            "host": context.raw_request.host,
+            "port": context.raw_request.port,
         }
         try:
             cmd_line = context.pipeline_cmds[0]
@@ -402,7 +435,9 @@ class CommandExecutor:
             # Connection is still alive — the command did NOT cause a disconnect.
             out_str = _decode(result.stdout)
             err_str = _decode(result.stderr)
-            final_output = out_str + ("\n" + err_str if err_str and out_str else err_str)
+            final_output = out_str + (
+                "\n" + err_str if err_str and out_str else err_str
+            )
 
             logger.warning(
                 f"Fire-and-forget command '{context.command_name}' on {target} completed without disconnecting.",
@@ -422,16 +457,21 @@ class CommandExecutor:
                 status=CommandStatus.SUCCESS.value,
                 message=f"Command dispatched and connection to {target} dropped as expected.",
             )
-        except Exception as e:
+        # Last-resort guard on a fire-and-forget dispatch: the caller gets a failed response, never an unhandled traceback.
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(
                 f"Unexpected error during fire-and-forget '{context.command_name}' on {target}: {str(e)}",
                 extra=log_extra,
             )
-            return CommandExecutionResponse.failed(message=f"Unexpected error: {str(e)}")
+            return CommandExecutionResponse.failed(
+                message=f"Unexpected error: {str(e)}"
+            )
         finally:
             conn.close()
 
-    def _apply_output_policy(self, logged: bool, success: bool, output: str) -> Optional[str]:
+    def _apply_output_policy(
+        self, logged: bool, success: bool, output: str
+    ) -> Optional[str]:
         """Decide what output to persist on CommandState for a finished command.
 
         Non-logged commands keep their full output (legacy behaviour). Logged
@@ -450,7 +490,11 @@ class CommandExecutor:
         return "\n".join(output.split("\n")[-tail_lines:])
 
     async def _maybe_backfill_output(
-        self, state: Optional[CommandState], logged: bool, success: bool, output: str,
+        self,
+        state: Optional[CommandState],
+        logged: bool,
+        success: bool,
+        output: str,
     ) -> str:
         """For a failed ``logged`` command with an empty SSH channel, replace the
         empty ``output`` with the control_node log tail.
@@ -469,7 +513,8 @@ class CommandExecutor:
         if state is None or not (logged and not success and not output):
             return output
         tail = await self._ssh._read_log_tail(
-            state, settings.COMMAND_LOG_FAILURE_TAIL_LINES,
+            state,
+            settings.COMMAND_LOG_FAILURE_TAIL_LINES,
         )
         return tail or output
 
@@ -481,7 +526,11 @@ class CommandExecutor:
             if response.status == CommandStatus.SUCCESS.value:
                 state.mark_success(response.exit_status or 0, response.output or "")
             else:
-                state.mark_failed(response.message or "", exit_code=response.exit_status, output=response.output)
+                state.mark_failed(
+                    response.message or "",
+                    exit_code=response.exit_status,
+                    output=response.output,
+                )
 
         # SAFETY: Only update outcome if the current state is still RUNNING.
         # If it's KILLING or KILLED, it means the command was aborted or killed externally.
@@ -489,10 +538,12 @@ class CommandExecutor:
             command_id,
             condition=lambda s: s.status == CommandStatus.RUNNING,
             updater=updater,
-            ttl_seconds=ttl
+            ttl_seconds=ttl,
         )
         if not updated:
-            logger.info(f"Skipping result storage for {command_id}; state was not RUNNING (possibly killed).")
+            logger.info(
+                f"Skipping result storage for {command_id}; state was not RUNNING (possibly killed)."
+            )
 
     def _build_step_wrapper(self, run_log_path: Optional[str]) -> List[str]:
         """Build the ``setsid ... sh -c <script> _`` wrapper for one pipeline step.
@@ -527,13 +578,15 @@ class CommandExecutor:
         """
         if not run_log_path:
             return ["setsid", "-w", "sh", "-c", 'echo $$ >&2; exec "$@"', "_"]
-        script = (
-            'echo $$ >&2; echo READY >&2; '
-            'exec "$@" > /dev/null 2>&1 < /dev/null'
-        )
+        script = 'echo $$ >&2; echo READY >&2; exec "$@" > /dev/null 2>&1 < /dev/null'
         return ["setsid", "-w", "sh", "-c", script, "_"]
 
-    async def _execute_pipeline(self, context: ExecutionContext, command_id: str, cmd_str_preview: str):
+    # Splitting this would scatter the SSH process/PGID bookkeeping that has to
+    # stay in one place to be reasoned about; tracked as a refactor, not silenced
+    # by an arbitrary split.
+    async def _execute_pipeline(  # pylint: disable=too-many-locals
+        self, context: ExecutionContext, command_id: str, cmd_str_preview: str
+    ):
         """Spawn each pipeline step on the remote host and capture PGIDs.
 
         Each step is wrapped (see ``_build_step_wrapper``) to create an isolated
@@ -557,8 +610,10 @@ class CommandExecutor:
         pgids = []
         prev_stdout = None
 
-        for i, cmd_args in enumerate(context.pipeline_cmds):
-            wrapper = self._build_step_wrapper(context.run_log_path if detached else None)
+        for cmd_args in context.pipeline_cmds:
+            wrapper = self._build_step_wrapper(
+                context.run_log_path if detached else None
+            )
             full_cmd = wrapper + cmd_args
 
             try:
@@ -567,10 +622,18 @@ class CommandExecutor:
                     command_str,
                     stdin=prev_stdout,
                     stdout=asyncssh.PIPE,
-                    stderr=asyncssh.PIPE
+                    stderr=asyncssh.PIPE,
                 )
             except Exception as e:
-                logger.error(f"Failed to create process: {e}", extra={"request_id": context.request_id, "command_id": command_id, "host": context.raw_request.host, "port": context.raw_request.port})
+                logger.error(
+                    f"Failed to create process: {e}",
+                    extra={
+                        "request_id": context.request_id,
+                        "command_id": command_id,
+                        "host": context.raw_request.host,
+                        "port": context.raw_request.port,
+                    },
+                )
                 raise
 
             processes.append(p)
@@ -578,8 +641,17 @@ class CommandExecutor:
             if pgid_str:
                 try:
                     pgids.append(int(pgid_str.strip()))
-                except Exception:
-                    logger.error(f"Could not parse PGID from: {pgid_str}", extra={"request_id": context.request_id, "command_id": command_id, "host": context.raw_request.host, "port": context.raw_request.port})
+                # Runs inside a background asyncio.Task; an escaping exception would be swallowed by the event loop with no log.
+                except Exception:  # pylint: disable=broad-exception-caught
+                    logger.error(
+                        f"Could not parse PGID from: {pgid_str}",
+                        extra={
+                            "request_id": context.request_id,
+                            "command_id": command_id,
+                            "host": context.raw_request.host,
+                            "port": context.raw_request.port,
+                        },
+                    )
 
             # Blind-spot B: for a detached (logged) run, the run's own output no
             # longer comes back over the channel, so the ONLY way to know it
@@ -602,7 +674,13 @@ class CommandExecutor:
 
         logger.info(
             f"Command '{context.command_name}' ({cmd_str_preview}) PGIDs assigned: {pgids}",
-            extra={"request_id": context.request_id, "username": context.username, "command_id": command_id, "host": context.raw_request.host, "port": context.raw_request.port}
+            extra={
+                "request_id": context.request_id,
+                "username": context.username,
+                "command_id": command_id,
+                "host": context.raw_request.host,
+                "port": context.raw_request.port,
+            },
         )
 
         for p in processes[:-1]:
@@ -610,7 +688,9 @@ class CommandExecutor:
 
         return processes[-1]
 
-    async def _collect_output(self, final_process: asyncssh.SSHClientProcess) -> tuple[int, str]:
+    async def _collect_output(
+        self, final_process: asyncssh.SSHClientProcess
+    ) -> tuple[int, str]:
         """Drain stdout and stderr from the final pipeline process.
 
         Merges both streams into a single output string (stdout first,
@@ -626,7 +706,9 @@ class CommandExecutor:
         final_output = out_str + ("\n" + err_str if err_str and out_str else err_str)
         return final_process.returncode, final_output
 
-    async def _handle_async_execution(self, context: ExecutionContext, command_id: Optional[str] = None) -> CommandExecutionResponse:
+    async def _handle_async_execution(
+        self, context: ExecutionContext, command_id: Optional[str] = None
+    ) -> CommandExecutionResponse:
         """Register a background task for pipeline execution with timeout control.
 
         Immediately returns ``status: running`` with a ``command_id``.
@@ -653,7 +735,8 @@ class CommandExecutor:
 
         opt = context.raw_request.option
         timeout_seconds = (
-            opt.timeout_seconds if opt is not None and opt.timeout_seconds is not None
+            opt.timeout_seconds
+            if opt is not None and opt.timeout_seconds is not None
             else settings.COMMAND_DEFAULT_TIMEOUT
         )
 
@@ -673,6 +756,7 @@ class CommandExecutor:
             ssh_config=context.raw_request.ssh_config,
             request_id=context.request_id,
             killable=context.cmd_config.killable,
+            output_format=context.cmd_config.output_format,
             pgids=[],
             exec_command=cmd_str_preview,
             run_log_path=context.run_log_path,
@@ -681,19 +765,27 @@ class CommandExecutor:
 
         logger.info(
             f"Initiating command '{context.command_name}' ({cmd_str_preview}) to {context.raw_request.host}:{context.raw_request.port} with timeout {timeout_seconds}s.",
-            extra={"request_id": context.request_id, "username": context.username, "command_id": command_id, "host": context.raw_request.host, "port": context.raw_request.port}
+            extra={
+                "request_id": context.request_id,
+                "username": context.username,
+                "command_id": command_id,
+                "host": context.raw_request.host,
+                "port": context.raw_request.port,
+            },
         )
 
         async def _execution_task():
             # 1. Execute Pipeline
-            final_process = await self._execute_pipeline(context, command_id, cmd_str_preview)
+            final_process = await self._execute_pipeline(
+                context, command_id, cmd_str_preview
+            )
 
             # Update PGIDs in Repository
             if entry.pgids:
                 await self.repo.update(
                     command_id,
                     lambda s: setattr(s, "pgids", entry.pgids),
-                    timeout_seconds + 30
+                    timeout_seconds + 30,
                 )
 
             # 2. Collect Output
@@ -701,7 +793,13 @@ class CommandExecutor:
 
             logger.info(
                 f"Command '{context.command_name}' finished. Exit Status: {returncode}",
-                extra={"request_id": context.request_id, "username": context.username, "command_id": command_id, "host": context.raw_request.host, "port": context.raw_request.port}
+                extra={
+                    "request_id": context.request_id,
+                    "username": context.username,
+                    "command_id": command_id,
+                    "host": context.raw_request.host,
+                    "port": context.raw_request.port,
+                },
             )
 
             success = returncode == 0
@@ -711,15 +809,29 @@ class CommandExecutor:
             if context.cmd_config.logged and not success and not output:
                 backfill_state = await self.repo.get(command_id)
                 output = await self._maybe_backfill_output(
-                    backfill_state, logged=True, success=False, output=output,
+                    backfill_state,
+                    logged=True,
+                    success=False,
+                    output=output,
                 )
             stored_output = self._apply_output_policy(
-                context.cmd_config.logged, success, output,
+                context.cmd_config.logged,
+                success,
+                output,
             )
             if success:
-                res = CommandExecutionResponse.success(command_id=command_id, exit_status=returncode, output=stored_output or "")
+                res = CommandExecutionResponse.success(
+                    command_id=command_id,
+                    exit_status=returncode,
+                    output=stored_output or "",
+                )
             else:
-                res = CommandExecutionResponse.failed(message="", exit_status=returncode, output=stored_output, command_id=command_id)
+                res = CommandExecutionResponse.failed(
+                    message="",
+                    exit_status=returncode,
+                    output=stored_output,
+                    command_id=command_id,
+                )
             await self._store_result(command_id, res)
 
         async def _timeout_wrapper():
@@ -729,23 +841,43 @@ class CommandExecutor:
             except asyncio.TimeoutError:
                 logger.warning(
                     f"Command '{context.command_name}' timed out after {timeout_seconds}s.",
-                    extra={"request_id": context.request_id, "username": context.username, "command_id": command_id, "host": context.raw_request.host, "port": context.raw_request.port}
+                    extra={
+                        "request_id": context.request_id,
+                        "username": context.username,
+                        "command_id": command_id,
+                        "host": context.raw_request.host,
+                        "port": context.raw_request.port,
+                    },
                 )
-                await self._lifecycle.kill_command(command_id, message="Command timed out and was killed.")
-            except Exception as e:
+                await self._lifecycle.kill_command(
+                    command_id, message="Command timed out and was killed."
+                )
+            # Same background-task guard as above.
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error(
                     f"Command '{context.command_name}' failed asynchronously: {str(e)}",
-                    extra={"request_id": context.request_id, "username": context.username, "command_id": command_id, "host": context.raw_request.host, "port": context.raw_request.port}
+                    extra={
+                        "request_id": context.request_id,
+                        "username": context.username,
+                        "command_id": command_id,
+                        "host": context.raw_request.host,
+                        "port": context.raw_request.port,
+                    },
                 )
-                await self._store_result(command_id, CommandExecutionResponse.failed(
-                    message=str(e), command_id=command_id
-                ))
+                await self._store_result(
+                    command_id,
+                    CommandExecutionResponse.failed(
+                        message=str(e), command_id=command_id
+                    ),
+                )
             finally:
                 context.conn.close()
                 pool_remove(command_id)
 
         entry.task = loop.create_task(_timeout_wrapper())
-        return CommandExecutionResponse(status=CommandStatus.RUNNING.value, command_id=command_id)
+        return CommandExecutionResponse(
+            status=CommandStatus.RUNNING.value, command_id=command_id
+        )
 
     def _check_capacity(self, username: str, request_id: str) -> None:
         """Raise ServiceUnavailableException if the running pool is full."""
@@ -761,7 +893,10 @@ class CommandExecutor:
             )
 
     async def execute_command(
-        self, username: str, request_id: str, req: CommandExecutionRequest,
+        self,
+        username: str,
+        request_id: str,
+        req: CommandExecutionRequest,
     ) -> CommandExecutionResponse:
         """Top-level orchestrator for SSH command execution.
 

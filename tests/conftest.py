@@ -38,6 +38,7 @@ def _generate_ssh_default_fixture() -> None:
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         from cryptography.hazmat.primitives import serialization as _ser
+
         _key = Ed25519PrivateKey.generate()
         _pem = _key.private_bytes(
             encoding=_ser.Encoding.PEM,
@@ -50,19 +51,31 @@ def _generate_ssh_default_fixture() -> None:
             key_path = Path(td) / "id_ed25519"
             subprocess.run(
                 [
-                    "ssh-keygen", "-t", "ed25519", "-N", "",
-                    "-f", str(key_path), "-C", "test-fixture-key", "-q",
+                    "ssh-keygen",
+                    "-t",
+                    "ed25519",
+                    "-N",
+                    "",
+                    "-f",
+                    str(key_path),
+                    "-C",
+                    "test-fixture-key",
+                    "-q",
                 ],
                 check=True,
             )
             key_b64 = base64.b64encode(key_path.read_bytes()).decode()
-    _SSH_FIXTURE_PATH.write_text(json.dumps({
-        "host": "localhost",
-        "port": 2223,
-        "username": "root",
-        "auth_method": "key",
-        "key_base64": key_b64,
-    }))
+    _SSH_FIXTURE_PATH.write_text(
+        json.dumps(
+            {
+                "host": "localhost",
+                "port": 2223,
+                "username": "root",
+                "auth_method": "key",
+                "key_base64": key_b64,
+            }
+        )
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)

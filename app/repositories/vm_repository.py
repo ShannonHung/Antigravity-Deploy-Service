@@ -96,11 +96,11 @@ class HttpVmRepository(VmRepository):
 
         try:
             payload = resp.json()
-        except Exception:
+        except Exception as exc:
             raise UpstreamUnavailableException(
                 f"VM API returned non-JSON response for '{node_name}'.",
                 detail={"node_name": node_name},
-            )
+            ) from exc
         if not isinstance(payload, dict) or "results" not in payload:
             raise UpstreamUnavailableException(
                 f"VM API returned unexpected payload shape for '{node_name}'.",

@@ -15,8 +15,22 @@ SLASH_MAP = {"no_slash": "type1", "with_slash": "type2"}
 def _repo():
     return InMemoryInventoryRepository(
         mappings={
-            "type1": [BastionMapping(patterns=["taiwan-.*"], runner="r1", bastion="b1", bastion_ip="10.1.0.1")],
-            "type2": [BastionMapping(patterns=["taiwan-taipei/.*"], runner="r2", bastion="b2", bastion_ip="10.2.0.2")],
+            "type1": [
+                BastionMapping(
+                    patterns=["taiwan-.*"],
+                    runner="r1",
+                    bastion="b1",
+                    bastion_ip="10.1.0.1",
+                )
+            ],
+            "type2": [
+                BastionMapping(
+                    patterns=["taiwan-taipei/.*"],
+                    runner="r2",
+                    bastion="b2",
+                    bastion_ip="10.2.0.2",
+                )
+            ],
         }
     )
 
@@ -38,7 +52,13 @@ async def test_slash_resolves_via_type2():
 
 async def test_no_pattern_match_raises_not_found():
     repo = InMemoryInventoryRepository(
-        mappings={"type1": [BastionMapping(patterns=["nope-.*"], runner="r", bastion="b", bastion_ip="9.9.9.9")]}
+        mappings={
+            "type1": [
+                BastionMapping(
+                    patterns=["nope-.*"], runner="r", bastion="b", bastion_ip="9.9.9.9"
+                )
+            ]
+        }
     )
     r = ClusterNameResolver(repo, SLASH_MAP)
     with pytest.raises(NotFoundException):
@@ -46,7 +66,9 @@ async def test_no_pattern_match_raises_not_found():
 
 
 def test_factory_returns_cluster_resolver():
-    r = create_host_resolver(HostType.CLUSTER, inventory_repo=_repo(), slash_map=SLASH_MAP)
+    r = create_host_resolver(
+        HostType.CLUSTER, inventory_repo=_repo(), slash_map=SLASH_MAP
+    )
     assert isinstance(r, ClusterNameResolver)
 
 

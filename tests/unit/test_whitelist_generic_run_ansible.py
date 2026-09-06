@@ -1,13 +1,16 @@
 """The whitelist exposes a single generic `run_ansible` entry (playbook chosen
 by a regex-restricted argument, optional --limit) plus a dedicated
 `run_ansible_clock` for the live-log demo (optional clock_count/interval)."""
+
 import json
 from pathlib import Path
 
 import pytest
 
 from app.domain.command import (
-    UserCommandWhitelist, CommandExecutionRequest, ExecutionContext,
+    UserCommandWhitelist,
+    CommandExecutionRequest,
+    ExecutionContext,
     SSHConnectionConfig,
 )
 from app.repositories.host_resolver import ResolvedHost
@@ -43,6 +46,7 @@ def test_generic_run_ansible_exists_with_playbook_arg():
 
 def test_playbook_regex_allows_known_rejects_unknown():
     import re
+
     rx = {a.name: a for a in _cmd("run_ansible").arguments}["playbook"].validation_regex
     assert re.match(rx, "ping.yml")
     assert re.match(rx, "fail.yml")
@@ -59,12 +63,19 @@ def test_clock_entry_kept_with_optional_tunables():
 
 def _ctx(cmd, args, run_id="rid"):
     req = CommandExecutionRequest(
-        command_name=cmd.command_name, host="localhost", port=2224,
-        username="root", ssh_config="control_node", arguments=args,
+        command_name=cmd.command_name,
+        host="localhost",
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        arguments=args,
     )
     ctx = ExecutionContext(
-        username="admin", request_id="r1", command_name=cmd.command_name,
-        raw_request=req, cmd_config=cmd,
+        username="admin",
+        request_id="r1",
+        command_name=cmd.command_name,
+        raw_request=req,
+        cmd_config=cmd,
         ssh_config=SSHConnectionConfig(auth_method="key", key_base64="x"),
         resolved_host=ResolvedHost(ip="1.2.3.4", source_input="localhost"),
     )
@@ -74,8 +85,12 @@ def _ctx(cmd, args, run_id="rid"):
 
 def test_build_generic_with_limit():
     svc = CommandService(repo=None, inventory_repo=None)
-    flat = svc._executor._pipeline_builder.build(_ctx(_cmd("run_ansible"),
-                                    {"playbook": "ping.yml", "inventory": "t/m.ini", "limit": "node1"}))[0]
+    flat = svc._executor._pipeline_builder.build(
+        _ctx(
+            _cmd("run_ansible"),
+            {"playbook": "ping.yml", "inventory": "t/m.ini", "limit": "node1"},
+        )
+    )[0]
     assert "ping.yml" in flat
     assert flat[flat.index("--limit") + 1] == "node1"
     assert "{" not in " ".join(flat)
@@ -83,8 +98,9 @@ def test_build_generic_with_limit():
 
 def test_build_generic_without_limit_drops_flag():
     svc = CommandService(repo=None, inventory_repo=None)
-    flat = svc._executor._pipeline_builder.build(_ctx(_cmd("run_ansible"),
-                                    {"playbook": "ping.yml", "inventory": "t/m.ini"}))[0]
+    flat = svc._executor._pipeline_builder.build(
+        _ctx(_cmd("run_ansible"), {"playbook": "ping.yml", "inventory": "t/m.ini"})
+    )[0]
     assert "--limit" not in flat
     assert "{" not in " ".join(flat)
     assert flat[flat.index("--run-id") + 1] == "rid"
@@ -92,13 +108,18 @@ def test_build_generic_without_limit_drops_flag():
 
 # ── clock tunables are independent: each --extra-vars pair stands alone ───────
 
+
 def _build_clock(args):
     svc = CommandService(repo=None, inventory_repo=None)
-    return svc._executor._pipeline_builder.build(_ctx(_cmd("run_ansible_clock"), args))[0]
+    return svc._executor._pipeline_builder.build(_ctx(_cmd("run_ansible_clock"), args))[
+        0
+    ]
 
 
 def test_clock_both_tunables():
-    flat = _build_clock({"inventory": "t/m.ini", "clock_count": 30, "clock_interval": 2})
+    flat = _build_clock(
+        {"inventory": "t/m.ini", "clock_count": 30, "clock_interval": 2}
+    )
     assert "clock_count=30" in flat and "clock_interval=2" in flat
     assert "{" not in " ".join(flat)
 

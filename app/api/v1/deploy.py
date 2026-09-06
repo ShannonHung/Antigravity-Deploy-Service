@@ -28,7 +28,6 @@ from app.core.dependencies import (
 from app.core.log_viewer_template import LOG_VIEWER_HTML
 from app.domain.models import ApiResponse, User
 from app.domain.pipeline_models import (
-    CancelRetryData,
     PipelineData,
     PipelineVariable,
     RunningPipelinesData,
@@ -87,6 +86,7 @@ def _request_id(request: Request) -> str:
 
 # ── POST /api/v1/deploy/stage ─────────────────────────────────────────────────
 
+
 @router.post(
     "/stage",
     response_model=ApiResponse[PipelineData],
@@ -99,14 +99,21 @@ def _request_id(request: Request) -> str:
 )
 async def trigger_pipeline(
     request: Request,
-    action: str = Query(..., description="Pipeline EXECUTION variable value (e.g. test-deploy)"),
-    ref_name: str = Query(default="main", description="Git branch or tag to run pipeline on"),
+    action: str = Query(
+        ..., description="Pipeline EXECUTION variable value (e.g. test-deploy)"
+    ),
+    ref_name: str = Query(
+        default="main", description="Git branch or tag to run pipeline on"
+    ),
     project_id: int | None = Query(None, description="GitLab project ID"),
     body: TriggerPipelineRequest = TriggerPipelineRequest(),
     current_user: Annotated[User, Depends(get_current_user(["deploy_api"]))] = None,
 ) -> ApiResponse[PipelineData]:
     svc = _get_deploy_service(project_id)
-    variables = [PipelineVariable(key="SERVICE_FROM", value=current_user.account), *body.variables]
+    variables = [
+        PipelineVariable(key="SERVICE_FROM", value=current_user.account),
+        *body.variables,
+    ]
     data = await svc.trigger_pipeline(
         action=action,
         ref=ref_name,
@@ -116,6 +123,7 @@ async def trigger_pipeline(
 
 
 # ── POST /api/v1/deploy/stage/check-running ─────────────────────────────────
+
 
 @router.post(
     "/stage/check-running",
@@ -147,6 +155,7 @@ async def check_running(
 
 # ── GET /api/v1/deploy/stage/{pipeline_id} ───────────────────────────────────
 
+
 @router.get(
     "/stage/{pipeline_id}",
     response_model=ApiResponse[PipelineData],
@@ -166,6 +175,7 @@ async def get_pipeline(
 
 # ── POST /api/v1/deploy/stage/{pipeline_id}/cancel ───────────────────────────
 
+
 @router.post(
     "/stage/{pipeline_id}/cancel",
     response_model=ApiResponse[PipelineData],
@@ -184,6 +194,7 @@ async def cancel_pipeline(
 
 
 # ── POST /api/v1/deploy/stage/{pipeline_id}/retry ────────────────────────────
+
 
 @router.post(
     "/stage/{pipeline_id}/retry",
@@ -211,8 +222,14 @@ async def retry_pipeline(
 async def get_formatted_job_trace(
     request: Request,
     job_id: int,
-    byte_offset: int = Query(0, ge=0, description="Byte offset of the last seen log byte; only newer bytes are returned"),
-    line_num: int = Query(1, ge=1, description="Line number to assign to the first returned line"),
+    byte_offset: int = Query(
+        0,
+        ge=0,
+        description="Byte offset of the last seen log byte; only newer bytes are returned",
+    ),
+    line_num: int = Query(
+        1, ge=1, description="Line number to assign to the first returned line"
+    ),
     project_id: int | None = Query(None, description="GitLab project ID"),
     current_user: User = Depends(get_current_user_cookie_or_header(["deploy_api"])),
     trace_cache: TraceCacheRepository = Depends(get_trace_cache_repository),
@@ -243,10 +260,12 @@ async def view_job(
     gitlab_root = settings.GITLAB_URL.rstrip("/")
     try:
         job_web_url = await svc.get_job_web_url(job_id)
-    except Exception as exc:
+    # The web_url is decorative; failing to resolve it must not break the viewer.
+    except Exception as exc:  # pylint: disable=broad-exception-caught
         _logger.warning(
             "Could not resolve job web_url for viewer | job=%s | %s",
-            job_id, exc,
+            job_id,
+            exc,
         )
         job_web_url = gitlab_root
 

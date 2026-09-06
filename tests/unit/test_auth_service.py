@@ -14,10 +14,10 @@ from app.core.exceptions import AuthException
 from app.domain.models import User, UserInDB
 from app.services.auth_service import AuthService
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
 HASHED_SECRET = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
+
 
 def _make_service(user_in_db: UserInDB | None = None) -> AuthService:
     """Return an AuthService backed by a mocked repository."""
@@ -28,6 +28,7 @@ def _make_service(user_in_db: UserInDB | None = None) -> AuthService:
 
 
 # ── authenticate ──────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_authenticate_success():
@@ -63,6 +64,7 @@ async def test_authenticate_unknown_account():
 
 # ── generate_token ────────────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_generate_token_returns_bearer():
     user = User(account="admin", scopes=["deploy_api"])
@@ -74,6 +76,7 @@ async def test_generate_token_returns_bearer():
 
 
 # ── hash_plain_password ───────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_hash_plain_password_differs_from_plain():
@@ -93,6 +96,7 @@ async def test_hash_plain_password_is_unique():
 
 
 # ── get_my_scopes / verify_user ───────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_get_my_scopes_reflects_user():

@@ -13,6 +13,7 @@ trace, which the repository serves WITHOUT any GitLab call — so the authed
 path resolves to a deterministic 200 and the test needs neither Redis nor a
 live GitLab.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 

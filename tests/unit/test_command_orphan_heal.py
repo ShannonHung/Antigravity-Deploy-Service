@@ -7,6 +7,7 @@ still RUNNING, read the marker, and lazily heal the state — so any pod, any
 time, recovers the true outcome. This must be race-safe with the fast path
 (`_store_result`), which also gates on status==RUNNING.
 """
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,10 +18,17 @@ from app.core.exceptions import NotFoundException, UpstreamUnavailableException
 
 def _state(**over):
     base = dict(
-        command_id="c1", status=CommandStatus.RUNNING, host="h",
-        resolved_ip="1.2.3.4", port=2224, username="root",
-        ssh_config="control_node", request_id="r1", exec_command="x",
-        killable=True, run_log_path="/var/log/ansible-runs/c1.log",
+        command_id="c1",
+        status=CommandStatus.RUNNING,
+        host="h",
+        resolved_ip="1.2.3.4",
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        request_id="r1",
+        exec_command="x",
+        killable=True,
+        run_log_path="/var/log/ansible-runs/c1.log",
     )
     base.update(over)
     return CommandState(**base)
@@ -29,6 +37,7 @@ def _state(**over):
 class _FakeRepo:
     """In-memory repo that honours update_if's RUNNING condition, so the
     heal/fast-path race is actually exercised rather than mocked away."""
+
     def __init__(self, state):
         self._state = state
 
@@ -50,13 +59,17 @@ def _svc(state):
 
 # ── sidecar path derivation ───────────────────────────────────────────────────
 
+
 def test_exit_marker_path_derived_from_log_path():
     svc = CommandService(repo=None, inventory_repo=None)
-    assert svc._state._exit_marker_path("/var/log/ansible-runs/abc.log") == \
-        "/var/log/ansible-runs/abc.exit"
+    assert (
+        svc._state._exit_marker_path("/var/log/ansible-runs/abc.log")
+        == "/var/log/ansible-runs/abc.exit"
+    )
 
 
 # ── heal on poll ──────────────────────────────────────────────────────────────
+
 
 async def test_poll_heals_to_success_when_marker_says_exit_0(monkeypatch):
     state = _state()
@@ -81,7 +94,9 @@ async def test_poll_heals_to_failed_when_marker_says_nonzero(monkeypatch):
 async def test_poll_stays_running_when_no_marker_yet(monkeypatch):
     state = _state()
     svc = _svc(state)
-    monkeypatch.setattr(svc._state, "_read_run_exit_marker", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        svc._state, "_read_run_exit_marker", AsyncMock(return_value=None)
+    )
     resp = await svc.get_command_execution_result("c1")
     assert resp.status == CommandStatus.RUNNING.value
     assert state.status == CommandStatus.RUNNING  # untouched
@@ -116,7 +131,9 @@ async def test_poll_killing_stays_killing_without_marker(monkeypatch):
     # leave it as KILLING (don't invent an outcome).
     state = _state(status=CommandStatus.KILLING, message="Killed")
     svc = _svc(state)
-    monkeypatch.setattr(svc._state, "_read_run_exit_marker", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        svc._state, "_read_run_exit_marker", AsyncMock(return_value=None)
+    )
     resp = await svc.get_command_execution_result("c1")
     assert resp.status == CommandStatus.KILLING.value
     assert state.status == CommandStatus.KILLING
@@ -151,7 +168,8 @@ async def test_poll_survives_ssh_failure_when_healing(monkeypatch):
     state = _state()
     svc = _svc(state)
     monkeypatch.setattr(
-        svc._state, "_read_run_exit_marker",
+        svc._state,
+        "_read_run_exit_marker",
         AsyncMock(side_effect=UpstreamUnavailableException("ssh down")),
     )
     resp = await svc.get_command_execution_result("c1")
@@ -161,8 +179,10 @@ async def test_poll_survives_ssh_failure_when_healing(monkeypatch):
 
 # ── the SSH marker read itself ────────────────────────────────────────────────
 
+
 async def test_read_run_exit_marker_returns_int_when_sidecar_present(monkeypatch):
     import shlex
+
     state = _state(run_log_path="/var/log/ansible-runs/c1.log")
     svc = _svc(state)
 
@@ -227,9 +247,12 @@ async def test_read_run_exit_marker_returns_none_when_absent(monkeypatch):
 async def test_heal_failed_backfills_output_from_log_tail(monkeypatch):
     state = _state()
     svc = _svc(state)
-    monkeypatch.setattr(svc._state, "_read_run_exit_marker", AsyncMock(return_value=128))
     monkeypatch.setattr(
-        svc._state._ssh, "_read_log_tail",
+        svc._state, "_read_run_exit_marker", AsyncMock(return_value=128)
+    )
+    monkeypatch.setattr(
+        svc._state._ssh,
+        "_read_log_tail",
         AsyncMock(return_value="fatal: could not read Username\n"),
     )
     resp = await svc.get_command_execution_result("c1")
@@ -253,8 +276,7 @@ async def test_heal_failed_survives_log_tail_none(monkeypatch):
     state = _state()
     svc = _svc(state)
     monkeypatch.setattr(svc._state, "_read_run_exit_marker", AsyncMock(return_value=2))
-    monkeypatch.setattr(
-        svc._state._ssh, "_read_log_tail", AsyncMock(return_value=None))
+    monkeypatch.setattr(svc._state._ssh, "_read_log_tail", AsyncMock(return_value=None))
     resp = await svc.get_command_execution_result("c1")
     assert resp.status == CommandStatus.FAILED.value
     assert resp.exit_status == 2
@@ -263,6 +285,7 @@ async def test_heal_failed_survives_log_tail_none(monkeypatch):
 
 async def test_unknown_command_still_raises_notfound():
     from app.core.exceptions import CommandExecutionException
+
     repo = MagicMock()
     repo.get = AsyncMock(side_effect=CommandExecutionException("nope"))
     svc = CommandService(repo=repo, inventory_repo=None)

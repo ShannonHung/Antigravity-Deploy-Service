@@ -27,6 +27,24 @@
         {"command": ["grep", "{key_word}"]}
       ],
       "arguments": [{"name": "key_word", "type": "string", "validation_regex": "^[a-zA-Z0-9._-]+$"}]
+    },
+    {
+      "command_name": "net_info",
+      "description": "JSON output example: `ip -j` emits JSON natively, so this declares output_format json and accepts ?format=json. Payload is a top-level ARRAY — output_json is typed Any so this stays valid.",
+      "disconnects_ssh": false,
+      "killable": true,
+      "output_format": "json",
+      "pipeline": [{"command": ["ip", "-j", "-br", "addr"]}],
+      "arguments": []
+    },
+    {
+      "command_name": "disk_report",
+      "description": "JSON output example: a small reporting script emitting a top-level OBJECT. Poll with ?format=json to get output_json parsed instead of a string.",
+      "disconnects_ssh": false,
+      "killable": true,
+      "output_format": "json",
+      "pipeline": [{"command": ["python3", "-c", "import json,os,shutil;t,u,f=shutil.disk_usage('/');print(json.dumps({'hostname':os.uname().nodename,'disk':{'total_gb':round(t/2**30,2),'used_gb':round(u/2**30,2),'free_gb':round(f/2**30,2),'used_pct':round(u/t*100,1)}}))"]}],
+      "arguments": []
     }
   ]
 }

@@ -43,9 +43,7 @@ class JsonUserRepository(UserRepository):
 
     def _load(self) -> list[dict]:
         if not self._path.exists():
-            _logger.error(
-                "Users JSON file not found | path=%s", self._path
-            )
+            _logger.error("Users JSON file not found | path=%s", self._path)
             raise NotFoundException(
                 f"Users data file not found at '{self._path}'.",
             )

@@ -33,7 +33,11 @@ async def test_lookup_success_returns_cluster_node_info():
             200,
             json={
                 "node_type": "baremetal",
-                "node": {"id": "1", "name": "node1", "labels": {"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"}},
+                "node": {
+                    "id": "1",
+                    "name": "node1",
+                    "labels": {"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"},
+                },
                 "cluster": {"id": "123", "name": "type1-cluster-c1"},
             },
         )
@@ -42,7 +46,11 @@ async def test_lookup_success_returns_cluster_node_info():
     info = await repo.lookup_by_name("node1")
     assert info == ClusterNodeInfo(
         node_type="baremetal",
-        node=NodeInfo(id="1", name="node1", labels={"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"}),
+        node=NodeInfo(
+            id="1",
+            name="node1",
+            labels={"mgmt_ip": "10.0.1.5/8", "router_id": "10.0.1.1"},
+        ),
         cluster=ClusterRef(id="123", name="type1-cluster-c1"),
     )
 
@@ -98,27 +106,31 @@ async def test_lookup_malformed_payload_raises_upstream_unavailable():
 
 async def test_lookup_null_labels_defaults_to_empty_dict():
     """node.labels: null in API response must be treated as an empty dict."""
-    repo = _repo(lambda r: httpx.Response(
-        200,
-        json={
-            "node_type": "baremetal",
-            "node": {"id": "1", "name": "node1", "labels": None},
-            "cluster": {"id": "123", "name": "cluster1"},
-        },
-    ))
+    repo = _repo(
+        lambda r: httpx.Response(
+            200,
+            json={
+                "node_type": "baremetal",
+                "node": {"id": "1", "name": "node1", "labels": None},
+                "cluster": {"id": "123", "name": "cluster1"},
+            },
+        )
+    )
     info = await repo.lookup_by_name("node1")
     assert info.node.labels == {}
 
 
 async def test_lookup_missing_labels_defaults_to_empty_dict():
     """node.labels key absent in API response must be treated as an empty dict."""
-    repo = _repo(lambda r: httpx.Response(
-        200,
-        json={
-            "node_type": "baremetal",
-            "node": {"id": "1", "name": "node1"},
-            "cluster": {"id": "123", "name": "cluster1"},
-        },
-    ))
+    repo = _repo(
+        lambda r: httpx.Response(
+            200,
+            json={
+                "node_type": "baremetal",
+                "node": {"id": "1", "name": "node1"},
+                "cluster": {"id": "123", "name": "cluster1"},
+            },
+        )
+    )
     info = await repo.lookup_by_name("node1")
     assert info.node.labels == {}

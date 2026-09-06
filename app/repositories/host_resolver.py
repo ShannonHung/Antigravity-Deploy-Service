@@ -116,12 +116,17 @@ class ClusterBastionHostResolver(HostResolver):
             node_type = node_info.node_type
             bastion_type = self._node_type_map.get(node_type)
             if bastion_type is None:
-                known = ", ".join(f"{k!r}→{v!r}" for k, v in self._node_type_map.items())
+                known = ", ".join(
+                    f"{k!r}→{v!r}" for k, v in self._node_type_map.items()
+                )
                 raise CommandExecutionException(
                     f"node_type '{node_type}' has no bastion mapping. "
                     f"Known mappings: {{{known}}}. "
                     "Update BASTION_NODE_TYPE_MAP to include this node_type.",
-                    detail={"node_type": node_type, "node_type_map": self._node_type_map},
+                    detail={
+                        "node_type": node_type,
+                        "node_type_map": self._node_type_map,
+                    },
                 )
 
         mappings = await self._inventory_repo.list_mappings(bastion_type)
@@ -134,7 +139,8 @@ class ClusterBastionHostResolver(HostResolver):
                     _logger.warning(
                         "Skipping invalid regex pattern %r in bastion mapping "
                         "(type=%s) — fix the mapping API data",
-                        pattern, bastion_type,
+                        pattern,
+                        bastion_type,
                     )
                     continue
                 if matched:
@@ -190,7 +196,8 @@ class ClusterNameResolver(HostResolver):
                     _logger.warning(
                         "Skipping invalid regex pattern %r in bastion mapping "
                         "(type=%s) — fix the mapping API data",
-                        pattern, bastion_type,
+                        pattern,
+                        bastion_type,
                     )
                     continue
                 if matched:
@@ -236,8 +243,6 @@ def create_host_resolver(
         return ClusterBastionHostResolver(inventory_repo, node_type_map, bastion_type)
     if host_type == HostType.CLUSTER:
         if inventory_repo is None or slash_map is None:
-            raise ValueError(
-                "CLUSTER resolver requires inventory_repo and slash_map"
-            )
+            raise ValueError("CLUSTER resolver requires inventory_repo and slash_map")
         return ClusterNameResolver(inventory_repo, slash_map)
     raise ValueError(f"Unsupported host_type: {host_type}")

@@ -30,6 +30,7 @@ T = TypeVar("T")
 # Storage / domain
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 class UserInDB(BaseModel):
     """Representation of a user as stored in the backing store.
 
@@ -52,7 +53,7 @@ class User(BaseModel):
 class TokenPayload(BaseModel):
     """JWT payload structure."""
 
-    sub: str          # account name
+    sub: str  # account name
     scopes: list[str] = Field(default_factory=list)
     exp: int | None = None
 
@@ -60,6 +61,7 @@ class TokenPayload(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 # Request models
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class HashPasswordRequest(BaseModel):
     """Body for POST /api/v1/auth/hash-password."""
@@ -70,6 +72,7 @@ class HashPasswordRequest(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 # Response models
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class ApiResponse(BaseModel, Generic[T]):
     """Unified success response envelope.
@@ -99,6 +102,7 @@ class ErrorDetail(BaseModel):
 # ──────────────────────────────────────────────────────────────────────────────
 # Endpoint-specific data payloads
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 class TokenData(BaseModel):
     """Internal data payload used by AuthService when generating a token."""

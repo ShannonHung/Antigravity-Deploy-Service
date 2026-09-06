@@ -14,8 +14,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-
 # ── POST /token ───────────────────────────────────────────────────────────────
+
 
 def test_login_success(client: TestClient):
     resp = client.post(
@@ -50,12 +50,14 @@ def test_login_unknown_account(client: TestClient):
 
 # ── Helper to get a valid token ───────────────────────────────────────────────
 
+
 def _get_token(client: TestClient, account: str = "test_admin") -> str:
     resp = client.post("/token", data={"username": account, "password": "secret"})
     return resp.json()["access_token"]
 
 
 # ── GET /api/v1/auth/verify ───────────────────────────────────────────────────
+
 
 def test_verify_valid_token(client: TestClient):
     token = _get_token(client)
@@ -87,6 +89,7 @@ def test_verify_bad_token(client: TestClient):
 
 # ── POST /api/v1/auth/hash-password ──────────────────────────────────────────
 
+
 def test_hash_password_no_auth_required(client: TestClient):
     resp = client.post(
         "/api/v1/auth/hash-password",
@@ -107,6 +110,7 @@ def test_hash_password_too_short(client: TestClient):
 
 
 # ── GET /api/v1/auth/my-scopes ────────────────────────────────────────────────
+
 
 def test_my_scopes_admin(client: TestClient):
     token = _get_token(client, "test_admin")
@@ -133,6 +137,7 @@ def test_my_scopes_deployer(client: TestClient):
 
 
 # ── X-Coordination-ID header behaviour ───────────────────────────────────────
+
 
 def test_coordination_id_echoed_in_response(client: TestClient):
     """If client sends X-Coordination-ID, it must be echoed in response header."""

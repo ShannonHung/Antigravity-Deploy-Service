@@ -12,6 +12,7 @@ the work no longer depends on the channel. Keep a two-line stderr handshake
 (b) detect a start-up failure (command never reached exec) instead of hanging
 in RUNNING forever.
 """
+
 from app.services.command_service import CommandService
 
 
@@ -21,26 +22,28 @@ def _svc():
 
 # ── the wrapper for a NON-logged step is unchanged (output still streamed) ─────
 
+
 def test_non_logged_wrapper_streams_output_over_channel():
     # run_log_path=None → legacy behaviour: no redirect, output goes to the PIPE.
     wrapper = _svc()._executor._build_step_wrapper(run_log_path=None)
     joined = " ".join(wrapper)
     assert "setsid" in joined
-    assert "echo $$ >&2" in joined          # PGID handshake kept
-    assert joined.endswith('exec "$@" _')   # exec is the last thing — no redirect
-    assert "/dev/null" not in joined        # not detached: output streams back
-    assert "READY" not in joined            # no READY handshake for non-logged
+    assert "echo $$ >&2" in joined  # PGID handshake kept
+    assert joined.endswith('exec "$@" _')  # exec is the last thing — no redirect
+    assert "/dev/null" not in joined  # not detached: output streams back
+    assert "READY" not in joined  # no READY handshake for non-logged
 
 
 # ── the wrapper for a LOGGED step detaches from the channel ───────────────────
+
 
 def test_logged_wrapper_severs_channel_and_detaches():
     log = "/var/log/ansible-runs/abc.log"
     wrapper = _svc()._executor._build_step_wrapper(run_log_path=log)
     # The wrapper is [..., "sh", "-c", <script>, "_"]; inspect the sh script.
     script = wrapper[wrapper.index("-c") + 1]
-    assert "echo $$ >&2" in script          # PGID handshake still first
-    assert "READY" in script                # start-up confirmation line
+    assert "echo $$ >&2" in script  # PGID handshake still first
+    assert "READY" in script  # start-up confirmation line
     # Output severed from the SSH channel (→ /dev/null), stdin detached. The run
     # SCRIPT itself tees to the log file; we must NOT redirect to it too (double
     # write). Severing the channel is what stops the SIGPIPE cascade (exit 141).
@@ -56,8 +59,13 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from app.domain.command import (
-    CommandExecutionRequest, CommandWhitelistConfig, PipelineStep,
-    SSHConnectionConfig, ExecutionContext, HostType, RunningCommandEntry,
+    CommandExecutionRequest,
+    CommandWhitelistConfig,
+    PipelineStep,
+    SSHConnectionConfig,
+    ExecutionContext,
+    HostType,
+    RunningCommandEntry,
 )
 from app.repositories.host_resolver import ResolvedHost
 import app.services.command_service as cs
@@ -65,16 +73,26 @@ import app.services.command_service as cs
 
 def _logged_ctx(command_id):
     cfg = CommandWhitelistConfig(
-        command_name="run_ansible", logged=True, killable=True,
+        command_name="run_ansible",
+        logged=True,
+        killable=True,
         pipeline=[PipelineStep(command=["/x/run-ansible.sh", "--run-id", "{run_id}"])],
     )
     req = CommandExecutionRequest(
-        command_name="run_ansible", host="localhost", host_type=HostType.IP,
-        port=2224, username="root", ssh_config="control_node", arguments={},
+        command_name="run_ansible",
+        host="localhost",
+        host_type=HostType.IP,
+        port=2224,
+        username="root",
+        ssh_config="control_node",
+        arguments={},
     )
     ctx = ExecutionContext(
-        username="admin", request_id="r1", command_name="run_ansible",
-        raw_request=req, cmd_config=cfg,
+        username="admin",
+        request_id="r1",
+        command_name="run_ansible",
+        raw_request=req,
+        cmd_config=cfg,
         ssh_config=SSHConnectionConfig(auth_method="key", key_base64="x"),
         resolved_host=ResolvedHost(ip="1.2.3.4", source_input="localhost"),
     )
@@ -106,9 +124,14 @@ async def test_logged_startup_failure_raises_when_no_ready(monkeypatch):
     # a failure, not hang the run in RUNNING.
     cmd_id = "blind-spot"
     ctx = _logged_ctx(cmd_id)
-    cs.pool_add(cmd_id, RunningCommandEntry(
-        host_ip="1.2.3.4", killable=True, conn=ctx.conn,
-    ))
+    cs.pool_add(
+        cmd_id,
+        RunningCommandEntry(
+            host_ip="1.2.3.4",
+            killable=True,
+            conn=ctx.conn,
+        ),
+    )
     # stderr yields a PGID then EOF — never READY.
     proc = _fake_process(["906\n", ""])
     ctx.conn.create_process = AsyncMock(return_value=proc)

@@ -5,6 +5,7 @@ Set-Cookie, so the HTML log viewer never gets the cookie. GET /login serves a
 real form; POST /login validates, sets the access_token cookie, and 302s back
 to ``next`` so the browser viewer is authenticated by a plain page navigation.
 """
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -35,8 +36,11 @@ def test_login_page_preserves_next(client):
 def test_login_post_sets_cookie_and_redirects(client):
     r = client.post(
         "/login",
-        data={"username": "test_admin", "password": "secret",
-              "next": "/api/v1/command/execution/abc/view"},
+        data={
+            "username": "test_admin",
+            "password": "secret",
+            "next": "/api/v1/command/execution/abc/view",
+        },
         follow_redirects=False,
     )
     assert r.status_code in (302, 303)
@@ -59,8 +63,11 @@ def test_login_rejects_offsite_next(client):
     # Open-redirect guard: an absolute/offsite next must not be honoured.
     r = client.post(
         "/login",
-        data={"username": "test_admin", "password": "secret",
-              "next": "https://evil.example.com/phish"},
+        data={
+            "username": "test_admin",
+            "password": "secret",
+            "next": "https://evil.example.com/phish",
+        },
         follow_redirects=False,
     )
     assert r.status_code in (302, 303)
