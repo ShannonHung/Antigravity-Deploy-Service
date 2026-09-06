@@ -4,18 +4,26 @@ from fastapi import APIRouter, Depends, Request, Query
 from fastapi.responses import HTMLResponse
 
 from app.domain.command import (
-    CommandExecutionRequest, CommandExecutionResponse,
-    CommandStatus, CommandTraceResponse,
-    UserCommandWhitelist, CommandWhitelistConfig,
-    RunningCommandsResponse, OutputFormat,
+    CommandExecutionRequest,
+    CommandExecutionResponse,
+    CommandStatus,
+    CommandTraceResponse,
+    UserCommandWhitelist,
+    CommandWhitelistConfig,
+    RunningCommandsResponse,
+    OutputFormat,
 )
 from app.core.log_viewer_template import LOG_VIEWER_HTML
 from app.services.command_service import CommandService
 from app.core.dependencies import (
-    get_current_user, get_current_user_cookie_or_header, get_command_service,
+    get_current_user,
+    get_current_user_cookie_or_header,
+    get_command_service,
 )
 from app.core.exceptions import (
-    CommandExecutionException, ConflictException, NotFoundException,
+    CommandExecutionException,
+    ConflictException,
+    NotFoundException,
 )
 from app.domain.models import User, ApiResponse
 
@@ -62,7 +70,7 @@ async def get_specific_command_info(
     response_model=ApiResponse[RunningCommandsResponse],
     summary="List in-flight commands across all pods (admin only)",
     description="Returns commands not yet in a terminal state (default running+killing). "
-                "Admin-gated so operators can decide whether an upgrade is safe.",
+    "Admin-gated so operators can decide whether an upgrade is safe.",
 )
 async def list_running_commands_endpoint(
     request: Request,
@@ -104,7 +112,7 @@ async def execute_command_endpoint(
         "`format=raw` (the default) is the historical response. `format=json` "
         "additionally parses the command's stdout into `output_json`, and is "
         "accepted only for commands whose whitelist entry declares "
-        "`output_format: \"json\"` (see GET /command/{command_name}/info) — "
+        '`output_format: "json"` (see GET /command/{command_name}/info) — '
         "asking for it on any other command is a 400. `output` itself always "
         "keeps its raw string value. When parsing does not happen, "
         "`output_json_error` says why."
@@ -113,8 +121,12 @@ async def execute_command_endpoint(
 async def get_command_execution_status(
     command_id: str,
     request: Request,
-    format: OutputFormat = Query(
+    # Named `output_format` in Python but exposed as `?format=` via alias: the
+    # query key is the public contract, while shadowing the `format` builtin in
+    # the function body is not worth it.
+    output_format: OutputFormat = Query(
         default=OutputFormat.RAW,
+        alias="format",
         description=(
             "raw = unchanged response; json = also parse stdout into "
             "output_json (requires the command to declare output_format json)."
@@ -123,7 +135,7 @@ async def get_command_execution_status(
     current_user: User = Depends(get_current_user(["command_api"])),
     svc: CommandService = Depends(get_command_service),
 ) -> ApiResponse[CommandExecutionResponse]:
-    response_data = await svc.get_command_execution_result(command_id, format)
+    response_data = await svc.get_command_execution_result(command_id, output_format)
     return ApiResponse(data=response_data, request_id=_request_id(request))
 
 
@@ -155,7 +167,9 @@ async def view_command(command_id: str):
     # Mirror deploy's view_job auth posture: the HTML shell is unauthed; the
     # /trace/ui endpoint it polls carries its own command_api-scoped token.
     trace_url = f"/api/v1/command/execution/{command_id}/trace/ui"
-    meta_html = f'<div><span class="label">Command ID</span><code>{command_id}</code></div>'
+    meta_html = (
+        f'<div><span class="label">Command ID</span><code>{command_id}</code></div>'
+    )
     return LOG_VIEWER_HTML.format(
         title=f"Command Log Viewer | {command_id}",
         heading=f"Command: {command_id}",
@@ -199,7 +213,11 @@ async def kill_command_endpoint(
     if not state.killable and not force:
         raise ConflictException(
             "Command is not killable. Retry with ?force=true to override.",
-            detail={"command_id": command_id, "killable": False, "force_required": True},
+            detail={
+                "command_id": command_id,
+                "killable": False,
+                "force_required": True,
+            },
         )
 
     await svc.kill_command(command_id, message="Killed by user request.", force=force)

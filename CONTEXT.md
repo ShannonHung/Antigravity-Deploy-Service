@@ -23,7 +23,7 @@ malformed one is a server misconfiguration, not a caller error.
 ## Output
 
 **Output** — The text a Run makes available on the poll endpoint. **Not a
-synonym for stdout.** Three different producers write it, and only the first is
+synonym for stdout.** Four different producers write it, and only the first is
 the command's actual standard output:
 
 1. *Fast-path success* — real stdout, captured by the pod that launched the Run.
@@ -31,8 +31,13 @@ the command's actual standard output:
    failure shows why it failed. Text, essentially never structured.
 3. *Healed success* — the **empty string**. Cross-pod recovery reconstructs the
    exit code from the control_node marker and never recovers the output.
+4. *Logged success* — also the **empty string**, deliberately. A Logged Run's
+   output lives in the control_node run log, served by the trace and view
+   endpoints; none is persisted on the Run's state.
 
-Any feature that interprets Output must say which of the three it applies to.
+Any feature that interprets Output must say which of the four it applies to.
+Note that (3) and (4) are indistinguishable from the state alone, yet mean
+opposite things: (3) is data loss, (4) is by design.
 
 **Output format** — The operator's declaration, in the Whitelist, of what a
 Command emits on stdout (`text` or `json`). Part of the Command's *contract*: it
@@ -48,9 +53,12 @@ whose contract declares it.
 emitted something that is not JSON. The remote script broke its own contract.
 Exceptional, and treated as such.
 
-**Output unavailable** — A Run succeeded, but its Output was lost (producer 3
-above). Distinguished from Parse failure because the cause is our own recovery
-path, not a broken script — a different fix, a different owner.
+**Output unavailable** — A Run succeeded, but no Output was persisted for it
+(producer 3 above). Distinguished from Parse failure because nothing was emitted
+that could have failed to parse — a different fix, a different owner. Producer 4
+would be indistinguishable from it, which is why declaring an Output format of
+`json` on a Logged Command is rejected outright rather than allowed to report a
+data loss that did not happen.
 
 ## Lifecycle
 
