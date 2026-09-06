@@ -21,14 +21,34 @@ Authorization: Bearer {{token}}
 GET {{base_url}}/api/v1/command/list_file/info
 Authorization: Bearer {{token}}
 
-### Execute list_file Command
+### Execute disk_report Command (JSON output — object)
+# Declares `output_format: "json"`, so the poll below may ask for ?format=json.
 # @name my_command
 POST {{base_url}}/api/v1/command/execution
 Authorization: Bearer {{token}}
 Content-Type: application/json
 
 {
-    "command_name": "whoami",
+    "command_name": "disk_report",
+    "host": "localhost",
+    "port": 2222,
+    "username": "root",
+    "ssh_config": "cluster1",
+    "option": {
+        "timeout_seconds": 30
+    },
+    "arguments": {}
+}
+
+### Execute net_info Command (JSON output — top-level array)
+# `ip -j` emits JSON natively. output_json is typed Any, so an array payload
+# is just as valid as an object.
+POST {{base_url}}/api/v1/command/execution
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+    "command_name": "net_info",
     "host": "localhost",
     "port": 2222,
     "username": "root",
@@ -139,10 +159,18 @@ Content-Type: application/json
 }
 
 
-### Poll Execution Status
+### Poll Execution Status (raw — the default, works for every command)
 @my_command_id = {{my_command.response.body.data.command_id}}
 
 GET {{base_url}}/api/v1/command/execution/{{my_command_id}}
+Authorization: Bearer {{token}}
+
+### Poll Execution Status (parsed — JSON-capable commands only)
+# `output_json` carries the parsed stdout; `output` keeps its raw string either
+# way. Only accepted when the command's whitelist entry declares
+# `output_format: "json"` (disk_report, net_info) — asking for it on a text
+# command such as sleep or list_file is a 400.
+GET {{base_url}}/api/v1/command/execution/{{my_command_id}}?format=json
 Authorization: Bearer {{token}}
 
 ### Kill command
